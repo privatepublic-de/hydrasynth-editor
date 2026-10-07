@@ -163,7 +163,7 @@ export class HydrasynthSession {
       const c = parseChunk(m)
       return c !== null && c.index === index && c.kind === kind
     })
-    const data = parseChunk(info)!.data.slice()
+    const data = new Uint8Array(parseChunk(info)!.data)
     this.sendInfo(chunkAck(index, kind))
     return data
   }

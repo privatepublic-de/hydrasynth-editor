@@ -85,7 +85,7 @@ export function parseBankNames(data: Uint8Array): { bank: number; names: string[
  * changed only there, identical from then on). Edisyn writes them too.
  */
 export function normalizePatch(patch: Uint8Array): Uint8Array {
-  const out = patch.slice()
+  const out = new Uint8Array(patch)
   for (let i = 2390; i < 2400; i += 2) {
     out[i] = 0x9c
     out[i + 1] = 0xff

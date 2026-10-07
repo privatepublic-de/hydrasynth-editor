@@ -8,5 +8,9 @@ Edisyn (https://github.com/eclab/edisyn, edisyn/synth/asmhydrasynth/info/):
   Licensed under the Apache License, Version 2.0
   http://www.apache.org/licenses/LICENSE-2.0
 
+src/params/generated.ts is generated from that driver (its parameter layout,
+ranges, display strings and NRPN encodings, extracted by running it;
+tools/edisyn-extract/ names the exact commit).
+
 test/fixtures/sawexpressive.syx.hex is the "Sawpressive GD" dump from Edisyn's
 Decode.java, converted to hex text.
