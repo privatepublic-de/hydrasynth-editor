@@ -1,0 +1,12 @@
+hydrasynth-editor
+
+The Hydrasynth SysEx protocol, patch format and corrected NRPN tables this
+project builds on were reverse engineered by Sean Luke and contributors for
+Edisyn (https://github.com/eclab/edisyn, edisyn/synth/asmhydrasynth/info/):
+
+  Copyright 2023 by Sean Luke
+  Licensed under the Apache License, Version 2.0
+  http://www.apache.org/licenses/LICENSE-2.0
+
+test/fixtures/sawexpressive.syx.hex is the "Sawpressive GD" dump from Edisyn's
+Decode.java, converted to hex text.
