@@ -11,6 +11,12 @@ const NAME = { offset: 9, length: 16 }
 const MACRO_NAME = { offset: 1630, stride: 17, length: 16 }
 /** Firmware 2.x keeps the vibrato amount's tenths in a separate byte. */
 const VIBRATO = { whole: 46, tenths: 2462 }
+/**
+ * A second copy of the arp tempo (the param reads byte 28). They differ in ~1/5 of real
+ * patches; Edisyn writes both, and a whole-patch send with only byte 28 changed left the
+ * synth's tempo as it was (user, 2026-10-08).
+ */
+const ARP_TEMPO_COPY = 808
 /** The synth stores a category byte beside every mod-matrix and macro target. */
 const MOD_TARGET = /^modmatrix(\d+)modtarget$/
 const MACRO_TARGET = /^macro(\d)target(\d)$/
@@ -61,6 +67,8 @@ export class Patch {
   set(key: string, value: number) {
     const def = param(key)
     const v = Math.max(def.min, Math.min(def.max, Math.round(value)))
+    // Unchanged values leave the bytes alone (e.g. an arp tempo copy that differs stays as stored).
+    if (this.get(key) === v) return
     if (def.special === 'vibratoAmount') {
       this.bytes[VIBRATO.whole] = Math.floor(v / 10)
       this.bytes[VIBRATO.tenths] = v % 10
@@ -68,7 +76,10 @@ export class Patch {
     }
     writeField(this.bytes, def.field!, v)
     let m: RegExpMatchArray | null
-    if ((m = key.match(MOD_TARGET))) this.bytes[1030 + (+m[1] - 1) * 2] = MOD_DESTINATION_CATEGORIES[v]
+    if (key === 'arptempo') {
+      this.bytes[ARP_TEMPO_COPY] = v & 0xff
+      this.bytes[ARP_TEMPO_COPY + 1] = v >> 8
+    } else if ((m = key.match(MOD_TARGET))) this.bytes[1030 + (+m[1] - 1) * 2] = MOD_DESTINATION_CATEGORIES[v]
     else if ((m = key.match(MACRO_TARGET))) this.bytes[1478 + (+m[1] - 1) * 16 + (+m[2] - 1) * 2] = MOD_DESTINATION_CATEGORIES[v]
   }
 

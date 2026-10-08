@@ -2,13 +2,12 @@
 
 1. **Parameter model** (done): `src/params/`, generated from Edisyn's driver
    (`tools/edisyn-extract/run.sh`, then `tools/generateParams.ts`).
-2. **Patch state + MIDI sync**: a store holding the open `Patch`; edits send their NRPN
-   (rate-limited, mode params before the values that depend on them, the synth's echoes
-   ignored); params without NRPN go out as a whole-patch send to H128 after a pause.
-   Load/write slots; write = 3.5 s pause afterwards.
-   Open: a mode switch (BPM sync on/off, mutant mode, FX type) reinterprets a shared byte with a
-   different range, which can leave an out-of-range value. Clamp, reset, or do what the synth
-   does -- check on the device before deciding.
+2. **Patch state + MIDI sync** (done, `src/sync/`, checked on the device 2026-10-08):
+   `PatchSync` opens a slot (download + program change), sends edits as NRPN (`NrpnQueue`:
+   coalesced, mode params first, 2-4 ms apart, paused during SysEx; the synth's echoes are
+   ignored), sends what NRPN can't carry as a whole patch to H128 1 s after the last such
+   edit, writes slots to flash (then 3.5 s quiet). Mode switches keep each mode's values
+   apart, as the synth does (below).
 3. **Main view**: React + TypeScript, one screen. **Mirror the Desktop's own module-select
    buttons** (user, 2026-10-08): the panel's signal-flow row of buttons (OSC 1, OSC 2, OSC 3,
    MUTANT 1-4, MIXER, FILTER 1/2, AMP, ...) selects the section shown, as on the hardware.
@@ -37,8 +36,9 @@
 - **Out-of-range raw values** are kept, not clamped, and shown as `? (n)`: filter 1 type 16
   (28 patches), FX sidechain 5/6, unset LFO steps (0), ribbon key lock 0, a few stray bytes.
 - **FX parameter NRPN** (`prefxNparamM`): Edisyn never sends them live. We use the generic
-  per-slot numbers x8, which its code implies; **unverified on hardware** -- until checked,
-  a whole-patch send is the fallback.
+  per-slot numbers x8, which its code implies -- confirmed on the device.
+- **Arp tempo** is stored twice (bytes 28 and 808, differing in ~1/5 of patches); Edisyn
+  writes both but reads one. We write both.
 
 - **Arp Tempo and Filter 1 Vowel Order** have NRPN numbers but the synth ignores them on
   receive (Edisyn's notes): no live NRPN, whole-patch send only. Neither do name, category,
@@ -61,6 +61,21 @@
   1.5 / -4.2 / 1.0 dB, 768 / 7600 Hz, 100 %.
 - The screen names an FX preset ("Lo-Fi", "Warm"); where the patch stores it is not mapped yet.
 
+- Live NRPN (filter cutoff), FX params by NRPN (Pre-FX EQ Low Gain -0.7 dB, Xover Lo 600 Hz),
+  a BPM sync switch, and a whole-patch send to H128 (Arp Latch, Macro 1 name) all showed the
+  expected values on the screen.
+- **Mode switches**: the synth keeps sync-on and sync-off values apart while editing. A4
+  "Twilight ET" (Env 1 attack 1.15 s, decay 2.30 s, sync off): sync on showed 0 / 0, sync
+  off again restored 1.15 s / 2.30 s; its NRPN echo reported 5000 / 5016 (625 x 8). A patch
+  stores only the active mode's value; the other starts at 0 when loaded. `PatchSync` does
+  the same (`inactiveValues`). FX type and mutant mode are assumed to work alike (unchecked).
+- **Arp tempo**: with System "Tempo Lock" on and the clock source USB (the user's settings),
+  the synth keeps its own tempo (85.0) whatever the patch says. The UI should say so next to
+  the tempo instead of looking broken.
+
 ## Open questions for the device
 
-- Live FX parameter NRPN (see above).
+- Switching FX type or mutant mode: does the synth keep the other type's values apart too
+  (as for BPM sync), or load defaults/a preset? Today a type never used since loading starts
+  at its params' minimums.
+

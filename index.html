@@ -70,6 +70,16 @@
       <span class="dim">reads H128, sends the same bytes back to working memory (no flash write), reloads it, reads it again</span>
     </div>
     <div class="row">
+      <strong>Live sync test</strong>
+      <button data-op="sync-open" disabled>Open (bank + patch above)</button>
+      <button data-op="sync-cutoffLow" disabled>Cutoff low</button>
+      <button data-op="sync-cutoffHigh" disabled>Cutoff high</button>
+      <button data-op="sync-fx" disabled>Pre-FX EQ params</button>
+      <button data-op="sync-bpm" disabled>Toggle Env 1 BPM sync</button>
+      <button data-op="sync-modeOnly" disabled>Env 1 BPM sync, mode only</button>
+      <button data-op="sync-full" disabled>Arp latch + macro name (whole patch)</button>
+    </div>
+    <div class="row">
       <label><input id="raw" type="checkbox" /> show raw traffic</label>
       <button id="clear">Clear log</button>
     </div>

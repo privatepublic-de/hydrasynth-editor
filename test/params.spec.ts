@@ -22,6 +22,7 @@ function derivedBytes(key: string): number[] {
   let m: RegExpMatchArray | null
   if ((m = key.match(/^modmatrix(\d+)modtarget$/))) return [1030 + (+m[1] - 1) * 2]
   if ((m = key.match(/^macro(\d)target(\d)$/))) return [1478 + (+m[1] - 1) * 16 + (+m[2] - 1) * 2]
+  if (key === 'arptempo') return [808, 809]
   return []
 }
 
@@ -62,6 +63,12 @@ describe('parameter schema', () => {
     p.bytes[f.offset + 1] = 0xff
     p.set('mutant3sourcefmlin', 3)
     expect([p.bytes[f.offset], p.bytes[f.offset + 1]]).toEqual([3, 0])
+  })
+
+  it('writes the arp tempo to both of its copies', () => {
+    const p = fixturePatch()
+    p.set('arptempo', 1234)
+    expect([p.bytes[28] | (p.bytes[29] << 8), p.bytes[808] | (p.bytes[809] << 8)]).toEqual([1234, 1234])
   })
 
   it('keeps a mod-matrix target and its category byte together', () => {
@@ -186,7 +193,8 @@ describe.skipIf(!haveExtract)('against Edisyn, on the dumped patches', () => {
                 return { param: (cc.get(99)! << 7) | cc.get(98)!, value: (cc.get(6)! << 7) | cc.get(38)! }
               })()
             : null
-        if (theirs === null && def.nrpn && 'unverified' in def.nrpn) continue
+        // Edisyn never sends FX params live (see tools/generateParams.ts); ours are confirmed on the device.
+        if (theirs === null && /^(pre|post)fx\dparam\d$/.test(key)) continue
         if (JSON.stringify(ours) !== JSON.stringify(theirs)) mismatches.push(`${key}=${v}: ours ${JSON.stringify(ours)}, Edisyn ${JSON.stringify(theirs)}`)
         checked++
       }

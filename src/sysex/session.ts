@@ -18,8 +18,14 @@ import {
   patchChunks,
   patchRequest,
   versionRequest,
+  writeRequest,
   type ChunkKind,
 } from './protocol'
+
+/** Saving rewrites the synth's whole flash; Edisyn measured "3 seconds or more". */
+const WRITE_TIMEOUT_MS = 10_000
+/** Edisyn: nothing may reach the synth for at least 3.5 s after a write, notes included. */
+export const WRITE_SETTLE_MS = 3500
 
 export interface SessionEvent {
   dir: 'in' | 'out'
@@ -118,23 +124,44 @@ export class HydrasynthSession {
    * change away and back (see `reloadSlot`).
    */
   uploadToRam(bank: number, patch: number, data: Uint8Array): Promise<{ savedAck: boolean }> {
+    return this.exclusive(() => this.locked(() => this.sendPatch(bank, patch, data)))
+  }
+
+  /**
+   * Stores a patch in a slot and saves to flash. The synth rewrites all of its
+   * memory, so it ignores everything for ~3.5 s afterwards; the session holds
+   * its queue that long before the next operation.
+   */
+  writePatch(bank: number, patch: number, data: Uint8Array): Promise<{ savedAck: boolean }> {
+    return this.exclusive(async () => {
+      const result = await this.locked(async () => {
+        const sent = await this.sendPatch(bank, patch, data)
+        await this.request(writeRequest(), CMD.writeRequestReply, WRITE_TIMEOUT_MS)
+        return sent
+      })
+      await sleep(WRITE_SETTLE_MS)
+      return result
+    })
+  }
+
+  /** Resolves once every queued operation has finished. */
+  idle(): Promise<void> {
+    return this.busy.then(() => undefined)
+  }
+
+  private async sendPatch(bank: number, patch: number, data: Uint8Array): Promise<{ savedAck: boolean }> {
     const body = normalizePatch(data)
     body[0] = 0x06
     body[2] = bank
     body[3] = patch
-    return this.exclusive(() =>
-      this.locked(async () => {
-        const chunks = patchChunks(body)
-        for (const [i, chunk] of chunks.entries()) {
-          const ack = this.expect((m) => m[0] === CMD.chunkAck && m[2] === i && m[3] === CHUNK_KIND.patch)
-          this.sendInfo(chunkMessage(i, CHUNK_KIND.patch, chunk))
-          await ack
-        }
-        // Arrives before the last chunk's ack, so by now it is in the inbox if it came at all.
-        const savedAck = this.inbox.some((m) => m[0] === CMD.patchSavedAck && m[2] === bank && m[3] === patch)
-        return { savedAck }
-      }),
-    )
+    for (const [i, chunk] of patchChunks(body).entries()) {
+      const ack = this.expect((m) => m[0] === CMD.chunkAck && m[2] === i && m[3] === CHUNK_KIND.patch)
+      this.sendInfo(chunkMessage(i, CHUNK_KIND.patch, chunk))
+      await ack
+    }
+    // Arrives before the last chunk's ack, so by now it is in the inbox if it came at all.
+    const savedAck = this.inbox.some((m) => m[0] === CMD.patchSavedAck && m[2] === bank && m[3] === patch)
+    return { savedAck }
   }
 
   /**
@@ -142,13 +169,15 @@ export class HydrasynthSession {
    * re-uploaded slot: bank select, a program change away, then back.
    * Timings are Edisyn's (150 ms between, ~200 ms before playing).
    */
-  async reloadSlot(channel: number, bank: number, patch: number) {
-    this.sendRaw(controlChange(channel, 0, 0))
-    this.sendRaw(controlChange(channel, 32, bank))
-    this.sendRaw(programChange(channel, patch === 0 ? 1 : 0))
-    await sleep(150)
-    this.sendRaw(programChange(channel, patch))
-    await sleep(200)
+  reloadSlot(channel: number, bank: number, patch: number): Promise<void> {
+    return this.exclusive(async () => {
+      this.sendRaw(controlChange(channel, 0, 0))
+      this.sendRaw(controlChange(channel, 32, bank))
+      this.sendRaw(programChange(channel, patch === 0 ? 1 : 0))
+      await sleep(150)
+      this.sendRaw(programChange(channel, patch))
+      await sleep(200)
+    })
   }
 
   /** Plain channel messages (bank select, program change), outside the SysEx flow. */
@@ -188,8 +217,8 @@ export class HydrasynthSession {
     return run
   }
 
-  private request(info: number[], replyCmd: number): Promise<Uint8Array> {
-    const reply = this.expect((m) => m[0] === replyCmd)
+  private request(info: number[], replyCmd: number, timeoutMs?: number): Promise<Uint8Array> {
+    const reply = this.expect((m) => m[0] === replyCmd, timeoutMs)
     this.sendInfo(info)
     return reply
   }
@@ -200,7 +229,7 @@ export class HydrasynthSession {
     this.transport.send(raw)
   }
 
-  private expect(accept: (info: Uint8Array) => boolean): Promise<Uint8Array> {
+  private expect(accept: (info: Uint8Array) => boolean, timeoutMs = this.timeoutMs): Promise<Uint8Array> {
     const early = this.inbox.findIndex(accept)
     if (early >= 0) return Promise.resolve(this.inbox.splice(early, 1)[0])
     return new Promise((resolve, reject) => {
@@ -210,8 +239,8 @@ export class HydrasynthSession {
         reject,
         timer: setTimeout(() => {
           this.waiters = this.waiters.filter((w) => w !== waiter)
-          reject(new SysexTimeoutError(`no reply within ${this.timeoutMs} ms`))
-        }, this.timeoutMs),
+          reject(new SysexTimeoutError(`no reply within ${timeoutMs} ms`))
+        }, timeoutMs),
       }
       this.waiters.push(waiter)
     })

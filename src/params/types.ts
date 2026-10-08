@@ -19,7 +19,7 @@ export interface Condition {
 
 export type NrpnSpec =
   /** value14 = base + v*mul, plus negAdd for v < 0 (the synth's two's complement in 7 or 14 bits). */
-  | { param: number; base: number; mul: number; negAdd: number; unverified?: true }
+  | { param: number; base: number; mul: number; negAdd: number }
   /** value14 = NRPN_TABLES[table][v - min] */
   | { param: number; table: number }
 

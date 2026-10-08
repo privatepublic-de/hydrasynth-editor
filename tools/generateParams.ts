@@ -39,7 +39,8 @@ for (const line of readFileSync(`${dir}/nrpn.jsonl`, 'utf8').trim().split('\n'))
 // Edisyn reads these with its 1-byte setter, but real patches hold 256 (= +128) here, which needs both bytes.
 const TWO_BYTE_OVERRIDES = /^voicemodulation\d$/
 // FX params never reach Edisyn's FX branch (its per-key NRPN lookup fails first); its code
-// implies the generic per-slot param numbers, x8. Unconfirmed on hardware.
+// implies the generic per-slot param numbers, x8. Confirmed on the user's Desktop
+// (2026-10-08: Pre-FX EQ Low Gain and Xover Lo set live showed the expected values).
 const FX_PARAM_NRPN: Record<string, number[]> = {
   pre: [8431, 8432, 7600, 7616, 7632],
   post: [8434, 8435, 7728, 7744, 7760],
@@ -103,7 +104,7 @@ const nrpnIndex = new Map<string, number>()
 
 function nrpnSpec(key: string, min: number): NrpnSpec | undefined {
   const fx = key.match(/^(pre|post)fx\dparam(\d)$/)
-  if (fx) return { param: FX_PARAM_NRPN[fx[1]][+fx[2] - 1], base: 0, mul: 8, negAdd: 0, unverified: true }
+  if (fx) return { param: FX_PARAM_NRPN[fx[1]][+fx[2] - 1], base: 0, mul: 8, negAdd: 0 }
   const rows = nrpnRows.get(key)
   if (!rows) return undefined
   const points: [number, number, number][] = []
