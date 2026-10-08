@@ -64,6 +64,31 @@ function WriteDialog({ initial, onClose }: { initial: Slot; onClose: () => void 
   )
 }
 
+/** Asks before a newly picked patch replaces one with unsaved changes. */
+function DiscardDialog({ slot, onConfirm, onCancel }: { slot: Slot; onConfirm: () => void; onCancel: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null)
+  const name = useEditor((s) => s.sync?.patch?.name ?? '')
+  const target = useEditor((s) => s.bankNames[slot.bank]?.[slot.patch])
+  useEffect(() => ref.current?.showModal(), [])
+  return (
+    <dialog ref={ref} className="write-dialog" onCancel={onCancel}>
+      <h2>Discard changes to “{name}”?</h2>
+      <p>
+        Opening {slotName(slot)}
+        {target ? ` “${target}”` : ''} replaces the patch you’re editing. Its changes haven’t been written to the synth.
+      </p>
+      <div className="write-dialog__actions">
+        <button type="button" className="function-button" onClick={onCancel} autoFocus>
+          Cancel
+        </button>
+        <button type="button" className="function-button function-button--primary" onClick={onConfirm}>
+          Discard changes and open
+        </button>
+      </div>
+    </dialog>
+  )
+}
+
 function Status() {
   const sync = useEditor((s) => s.sync)
   if (!sync) return null
@@ -93,8 +118,18 @@ export function PatchBar() {
   const sync = useEditor((s) => s.sync)
   const setName = useEditor((s) => s.setName)
   useEditor((s) => s.sync?.revision)
-  const [slot, setSlot] = useState<Slot>({ bank: 0, patch: 0 })
+  const [chosen, setChosen] = useState<Slot>({ bank: 0, patch: 0 })
+  const [pending, setPending] = useState<Slot | null>(null)
   const [writing, setWriting] = useState(false)
+  // The selectors show the open patch's slot; while asking or loading, the one picked. A
+  // cancelled or failed open leaves them back on the open patch.
+  const slot = pending ?? (sync?.busy ? chosen : (sync?.origin ?? chosen))
+  const pick = (next: Slot) => {
+    setChosen(next)
+    if (!sync?.patch) return // nothing open yet: the Open button loads it
+    if (sync.dirty) setPending(next)
+    else void open(next)
+  }
   const patch = sync?.patch
 
   if (connection.status === 'demo') {
@@ -137,10 +172,12 @@ export function PatchBar() {
           ))}
         </select>
       </label>
-      <SlotPicker slot={slot} onChange={setSlot} />
-      <button type="button" className="function-button" onClick={() => void open(slot)} disabled={!!sync?.busy}>
-        Open {slotName(slot)}
-      </button>
+      <SlotPicker slot={slot} onChange={pick} />
+      {!patch && (
+        <button type="button" className="function-button function-button--primary" onClick={() => void open(slot)} disabled={!!sync?.busy}>
+          Open {slotName(slot)}
+        </button>
+      )}
       {patch && (
         <>
           <input
@@ -157,6 +194,16 @@ export function PatchBar() {
       )}
       <Status />
       {writing && patch && <WriteDialog initial={sync?.origin ?? slot} onClose={() => setWriting(false)} />}
+      {pending && (
+        <DiscardDialog
+          slot={pending}
+          onCancel={() => setPending(null)}
+          onConfirm={() => {
+            setPending(null)
+            void open(pending)
+          }}
+        />
+      )}
     </header>
   )
 }
