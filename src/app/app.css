@@ -484,6 +484,9 @@ select {
   border-radius: 6px;
   padding: 20px 22px;
   max-width: 460px;
+  /* Dialogs opened from the patch bar would inherit its nowrap. */
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .write-dialog::backdrop {
