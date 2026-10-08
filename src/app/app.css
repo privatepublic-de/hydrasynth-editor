@@ -58,7 +58,8 @@ input {
 }
 
 .pads-dock .pads {
-  max-width: 1440px;
+  /* Narrow, so the pads keep roughly the hardware's proportions. */
+  max-width: 780px;
   margin: 0 auto;
   padding: 10px 34px 12px;
 }
@@ -418,9 +419,15 @@ select {
 /* --- pads ---------------------------------------------------------------- */
 .pads {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   gap: 18px;
   align-items: center;
+}
+
+.pads__latch[aria-pressed='true'] {
+  background: var(--lit);
+  color: #1a1a1a;
+  box-shadow: 0 0 12px rgba(242, 239, 230, 0.35);
 }
 
 .pads__octave {
@@ -437,13 +444,13 @@ select {
 }
 
 /* The Desktop's pads are dark rubber lit from below; colours as its Pad Key display uses
-   them: yellow = root, blue = white keys, green = black keys. */
+   them: yellow = root (each C), cyan = white keys, red = black keys. */
 .pad {
-  --glow: #4f86c6;
+  --glow: #3fc8d8;
   height: 30px;
   border-radius: 5px;
   border: 1px solid #3b3f44;
-  background: radial-gradient(ellipse at 50% 120%, color-mix(in srgb, var(--glow) 45%, transparent), transparent 70%), #1b1d20;
+  background: radial-gradient(ellipse at 50% 80%, color-mix(in srgb, var(--glow) 45%, transparent), transparent 70%), #1b1d20;
   color: var(--print);
   font: 500 12px/1 var(--label);
   cursor: pointer;
@@ -451,7 +458,7 @@ select {
 }
 
 .pad--sharp {
-  --glow: #4fae6a;
+  --glow: #e0484a;
 }
 
 .pad--root {
