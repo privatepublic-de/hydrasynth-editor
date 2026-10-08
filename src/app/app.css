@@ -534,6 +534,26 @@ select {
 .param-table {
   border-collapse: collapse;
   width: 100%;
+  /* Widths from the colgroup, not the content: columns stay put as values change. */
+  table-layout: fixed;
+}
+
+.param-table__row-head {
+  width: 3.75rem;
+}
+
+.param-table__dial {
+  width: 6.75rem;
+}
+
+.param-table__dial--badged {
+  width: 9rem;
+}
+
+/* A dial's value keeps one width, so the knob beside it doesn't move as digits come and go. */
+.param-table .dial .control__value {
+  min-width: 6ch;
+  text-align: left;
 }
 
 .param-table th {

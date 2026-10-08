@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { param, type Patch } from '../params/patch'
 import { MODULES, type ModuleLayout, type Page, type Slot } from '../ui/layout'
+import { destinationOf } from '../ui/modDestinations'
 import { isShown } from '../ui/visibility'
 import { ParamControl } from './controls/ParamControl'
 import { ModuleDisplay } from './ModuleDisplay'
@@ -124,12 +125,27 @@ function firstKey(rows: Page[]): string | undefined {
 
 function ParamTable({ rows }: { rows: Page[] }) {
   const patch = useEditor((s) => s.sync?.patch)!
-  const columns = rows[0].slots.map((_, i) => {
-    const key = rows.map((r) => visibleKey(r.slots[i], patch)).find((k) => k !== null)
-    return key ? columnName(param(key).labels[0] ?? '') : ''
-  })
+  const keys = rows[0].slots.map((_, i) => rows.map((r) => visibleKey(r.slots[i], patch)).find((k) => k !== null) ?? null)
+  const columns = keys.map((key) => (key ? columnName(param(key).labels[0] ?? '') : ''))
+  // Fixed column widths, so nothing shifts as dials appear or values grow a digit: where selects
+  // share the table, the dial columns get a set width and the selects the rest.
+  const mixed = keys.some((k) => k && param(k).widget === 'choice')
   return (
       <table className="param-table">
+        <colgroup>
+          <col className="param-table__row-head" />
+          {keys.map((k, i) => (
+            <col
+              key={i}
+              className={
+                mixed && k && param(k).widget !== 'choice'
+                  ? // A dial that can be a modulation destination gets room for its badges too.
+                    `param-table__dial${destinationOf(k) !== undefined ? ' param-table__dial--badged' : ''}`
+                  : undefined
+              }
+            />
+          ))}
+        </colgroup>
         <thead>
           <tr>
             <th scope="col" />
@@ -146,7 +162,7 @@ function ParamTable({ rows }: { rows: Page[] }) {
               <th scope="row">{row.title.replace(/^Macro \d /, '')}</th>
               {row.slots.map((slot, i) => {
                 const key = visibleKey(slot, patch)
-                if (key === null) return <td key={i} />
+                if (key === null || (unassigned(row, patch) && param(key).widget !== 'choice')) return <td key={i} />
                 const label = param(key).labels[0] ?? key
                 return (
                   <td key={i}>
@@ -159,6 +175,17 @@ function ParamTable({ rows }: { rows: Page[] }) {
         </tbody>
       </table>
   )
+}
+
+/**
+ * A mod matrix route or macro slot that doesn't modulate anything yet: a route without a source
+ * or a destination, a macro slot without a destination. Its dials do nothing, so they're left
+ * out; its selects stay, to assign it.
+ */
+function unassigned(row: Page, patch: Patch): boolean {
+  const keys = row.slots.filter((s): s is string => typeof s === 'string')
+  const off = (re: RegExp) => keys.some((k) => re.test(k) && !patch.get(k))
+  return off(/^modmatrix\d+mod(source|target)$/) || off(/^macro\d+target\d+$/)
 }
 
 /** A column heading from the first row's label: "Target 1" -> "Target", "Step 9" -> "Step". */
