@@ -6,7 +6,7 @@ import { useEditor } from './store'
 /** The patch selector's value while the open patch (Init, a file) isn't stored in a slot. */
 const NOT_STORED = -1
 
-function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot) => void }) {
+export function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot) => void }) {
   const names = useEditor((s) => s.bankNames[slot.bank])
   const loadBankNames = useEditor((s) => s.loadBankNames)
   useEffect(() => {
@@ -94,11 +94,13 @@ function DiscardDialog({ next, onConfirm, onCancel }: { next: Replacement; onCon
   )
 }
 
-/** Less frequent actions: backup now, restore later. */
+/** Less frequent actions: backup and restore. */
 function MoreMenu() {
   const [open, setOpen] = useState(false)
   const openBackup = useEditor((s) => s.openBackup)
+  const openRestore = useEditor((s) => s.openRestore)
   const ref = useRef<HTMLSpanElement>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (!open) return
     ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
@@ -128,8 +130,29 @@ function MoreMenu() {
           >
             Back up the synth…
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              fileInput.current?.click()
+            }}
+          >
+            Restore from a backup…
+          </button>
         </div>
       )}
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".syx"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = '' // the same file can be picked again
+          if (file) void openRestore(file)
+        }}
+      />
     </span>
   )
 }

@@ -24,6 +24,8 @@ import {
 
 /** Saving rewrites the synth's whole flash; Edisyn measured "3 seconds or more". */
 const WRITE_TIMEOUT_MS = 10_000
+/** Edisyn's pause between the patches of a batch write. */
+const BATCH_PATCH_PAUSE_MS = 100
 /** Edisyn: nothing may reach the synth for at least 3.5 s after a write, notes included. */
 export const WRITE_SETTLE_MS = 3500
 
@@ -141,6 +143,44 @@ export class HydrasynthSession {
       })
       await sleep(WRITE_SETTLE_MS)
       return result
+    })
+  }
+
+  /**
+   * Sends several patches to their slots in working memory, then, with `flash`, one write
+   * request that saves the synth's memory to flash -- only if every patch arrived and
+   * `keepGoing()` still holds. Edisyn's batch: one header/footer, ~100 ms between patches,
+   * one write. A failure or a stop skips the write, so flash keeps what it had.
+   */
+  writePatches(
+    items: { bank: number; patch: number; bytes: Uint8Array }[],
+    { onSent, keepGoing = () => true, flash }: { onSent?: (count: number) => void; keepGoing?: () => boolean; flash: boolean },
+  ): Promise<{ sent: number; writeRequested: boolean; flashed: boolean; error?: Error }> {
+    return this.exclusive(async () => {
+      let sent = 0
+      // Sent but unconfirmed is not "not written": the synth may have saved and the reply got lost.
+      let writeRequested = false
+      let flashed = false
+      let error: Error | undefined
+      try {
+        await this.locked(async () => {
+          for (const it of items) {
+            if (!keepGoing()) return
+            await this.sendPatch(it.bank, it.patch, it.bytes)
+            sent++
+            onSent?.(sent)
+            await sleep(BATCH_PATCH_PAUSE_MS)
+          }
+          if (!flash || !keepGoing()) return
+          writeRequested = true
+          await this.request(writeRequest(), CMD.writeRequestReply, WRITE_TIMEOUT_MS)
+          flashed = true
+        })
+      } catch (err) {
+        error = err as Error
+      }
+      if (writeRequested) await sleep(WRITE_SETTLE_MS)
+      return { sent, writeRequested, flashed, error }
     })
   }
 

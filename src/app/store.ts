@@ -9,7 +9,8 @@ import { HydrasynthSession } from '../sysex/session'
 import { destinationOf, freeMacroSlot, freeRoute, type Modulation } from '../ui/modDestinations'
 import demoDump from '../../test/fixtures/sawexpressive.syx.hex?raw'
 import { inSlotOrder, runBackup, type BackupProgress } from '../library/backup'
-import { backupFileName, encodeBackup, type StoredPatch } from '../library/backupFile'
+import { BackupFileError, backupFileName, decodeBackup, encodeBackup, type StoredPatch } from '../library/backupFile'
+import { runRestore, type RestoreItem, type RestoreProgress, type RestoreResult } from '../library/restore'
 import { History } from '../sync/history'
 import { PatchSync, labelFor, type Slot, type SyncState } from '../sync/patchSync'
 
@@ -29,6 +30,18 @@ export interface BackupState {
   retries: number
   /** Patches read so far for the chosen banks. */
   count: number
+}
+
+export interface RestoreState {
+  phase: 'choose' | 'running' | 'done'
+  fileName: string
+  /** The backup's patches, or why the file couldn't be read. */
+  patches: StoredPatch[]
+  fileError?: string
+  progress?: RestoreProgress
+  result?: RestoreResult
+  /** What the run replaces, in words ("bank C", "C12"). */
+  target?: string
 }
 
 interface EditorState {
@@ -54,6 +67,15 @@ interface EditorState {
   cancelBackup(): void
   /** Offers the patches read so far as a .syx download. */
   saveBackupFile(): void
+  /** The restore dialog's state; null while it's closed. */
+  restore: RestoreState | null
+  openRestore(file: File): Promise<void>
+  /** Writes `items` to their slots (flash included, checked afterwards); `target` names them. */
+  startRestore(items: RestoreItem[], target: string): Promise<void>
+  cancelRestore(): void
+  /** Offers what the restore replaced as a .syx download. */
+  saveReplaced(): void
+  closeRestore(): void
   /** The param context menu, at a viewport position. */
   menu: { x: number; y: number; key: string } | null
   openMenu(key: string, x: number, y: number): void
@@ -85,6 +107,17 @@ let session: HydrasynthSession | null = null
 /** Patches read by the current backup run (kept across a stop, so Continue reads only the rest). */
 let backupHave = new Map<string, StoredPatch>()
 let backupAbort: AbortController | null = null
+let restoreAbort: AbortController | null = null
+
+/** Hands `bytes` to the browser as a file download. */
+function download(bytes: Uint8Array, name: string) {
+  const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
 let patchSync: PatchSync | null = null
 
 const CHANNEL_KEY = 'hydrasynth-editor.channel'
@@ -106,6 +139,49 @@ export const useEditor = create<EditorState>((set, get) => ({
   reveal: null,
   menu: null,
   backup: null,
+  restore: null,
+
+  async openRestore(file) {
+    const fileName = file.name
+    try {
+      const patches = decodeBackup(new Uint8Array(await file.arrayBuffer()))
+      if (!patches.length) throw new BackupFileError('it holds no patches')
+      set({ restore: { phase: 'choose', fileName, patches } })
+    } catch (err) {
+      const why = err instanceof BackupFileError ? err.message : 'it couldn\u2019t be read'
+      set({ restore: { phase: 'choose', fileName, patches: [], fileError: `This isn\u2019t a Hydrasynth backup: ${why}.` } })
+    }
+  },
+
+  async startRestore(items, target) {
+    if (!session || get().restore?.phase === 'running') return
+    const update = (r: Partial<RestoreState>) => set((s) => ({ restore: s.restore && { ...s.restore, ...r } }))
+    update({ phase: 'running', target, progress: undefined, result: undefined })
+    await patchSync?.settled().catch(() => undefined)
+    restoreAbort = new AbortController()
+    const result = await runRestore({ session, items, signal: restoreAbort.signal, onProgress: (progress) => update({ progress }) }).catch(
+      (err: Error): RestoreResult => ({ outcome: 'not-written', previous: [], mismatches: [], reason: err.message }),
+    )
+    restoreAbort = null
+    // The patch list shows the new names once they're read again.
+    const banks = new Set(items.map((i) => i.bank))
+    set((s) => ({ bankNames: Object.fromEntries(Object.entries(s.bankNames).filter(([b]) => !banks.has(Number(b)))) }))
+    update({ phase: 'done', result })
+  },
+
+  cancelRestore() {
+    restoreAbort?.abort()
+  },
+
+  saveReplaced() {
+    const previous = get().restore?.result?.previous
+    if (previous?.length) download(encodeBackup(previous), backupFileName().replace('backup', 'before-restore'))
+  },
+
+  closeRestore() {
+    if (get().restore?.phase === 'running') return
+    set({ restore: null })
+  },
 
   openBackup() {
     backupHave = new Map()
@@ -145,14 +221,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   saveBackupFile() {
     const b = get().backup
-    if (!b) return
-    const file = encodeBackup(inSlotOrder(backupHave, b.banks))
-    const url = URL.createObjectURL(new Blob([file as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = backupFileName()
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    if (b) download(encodeBackup(inSlotOrder(backupHave, b.banks)), backupFileName())
   },
 
   revealModulation(m, focusKey) {

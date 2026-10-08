@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { ModuleEditor } from './ModuleEditor'
 import { BackupDialog } from './BackupDialog'
+import { RestoreDialog } from './RestoreDialog'
 import { ParamMenu } from './Modulation'
 import { ModuleSelect } from './ModuleSelect'
 import { Pads } from './Pads'
@@ -42,6 +43,8 @@ function useUndoKeys() {
       const t = e.target as HTMLElement
       if (t.isContentEditable || (t.tagName === 'INPUT' && (t as HTMLInputElement).type === 'text') || t.tagName === 'TEXTAREA') return
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+      // A modal dialog (backup, restore, write) has the synth or the decision: no edits then.
+      if (document.querySelector('dialog[open]')) return
       const k = e.key.toLowerCase()
       if (k === 'z' && !e.shiftKey) undo()
       else if ((k === 'z' && e.shiftKey) || (k === 'y' && e.ctrlKey)) redo()
@@ -71,6 +74,7 @@ export function App() {
       </footer>
       <ParamMenu />
       <BackupDialog />
+      <RestoreDialog />
     </div>
   )
 }
