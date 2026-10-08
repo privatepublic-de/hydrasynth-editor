@@ -82,6 +82,15 @@
   no NRPN for them, only arp tempo (0x3F 0x38) and all-notes-off (0x3F 0x4E, 0x3F 0x57).
   The user decided to leave system settings to the panel.
 
+- The panel sends what it changes (Param TX = NRPN; captured 2026-10-08 with tools/listenMidi.ts):
+  every knob as a full CC 99/98/6/38, values as Edisyn encodes them. Shared numbers are split by
+  value range (Env 1's 8064: loop, legato, delay, BPM sync... at their own bases) or by mode.
+  Switching BPM sync sends the synced Delay first, then the switch; an FX type change sends only
+  the type, not its five params. A patch change sends CC 0 / 32 and a program change, with
+  "all notes off", "sustain off" and NRPN 8151 = 0 (not in Edisyn's list). The editor follows
+  knobs (`src/midi/incoming.ts`, `PatchSync.received`); after a mode switch from the panel it
+  sends its values for the new mode, so both agree.
+
 ## Open questions for the device
 
 - Switching FX type or mutant mode: does the synth keep the other type's values apart too

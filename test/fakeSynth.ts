@@ -11,7 +11,7 @@ export type LogEntry = { sysex: number[] } | { channel: number[] }
 
 /** A synth that follows SysexEncoding.txt: each chunk only after the previous one's ack. */
 export class FakeHydrasynth implements MidiTransport {
-  private listener?: (m: Uint8Array) => void
+  private listeners = new Set<(m: Uint8Array) => void>()
   readonly received: number[][] = []
   readonly channelMessages: number[][] = []
   /** Everything received, in order. */
@@ -30,8 +30,13 @@ export class FakeHydrasynth implements MidiTransport {
   constructor(private readonly defaultChunks: Uint8Array[] = fixtureChunks()) {}
 
   subscribe(listener: (m: Uint8Array) => void) {
-    this.listener = listener
-    return () => (this.listener = undefined)
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  /** What the synth's panel sends: a knob's NRPN, a patch change. */
+  panel(...messages: number[][]) {
+    for (const m of messages) for (const l of this.listeners) l(Uint8Array.from(m))
   }
 
   send(raw: Uint8Array) {
@@ -113,7 +118,10 @@ export class FakeHydrasynth implements MidiTransport {
   }
 
   private reply(info: number[]) {
-    queueMicrotask(() => this.listener?.(encodeMessage(info)))
+    queueMicrotask(() => {
+      const m = encodeMessage(info)
+      for (const l of this.listeners) l(m)
+    })
   }
 }
 

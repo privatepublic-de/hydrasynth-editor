@@ -5,7 +5,8 @@
 //  - what NRPN can't carry (names, scales, arp tempo, ...) goes out as a whole patch to
 //    the scratch slot H128 (working memory, no flash write), which is then reloaded;
 //  - write saves to a slot and flash.
-import { encodeNrpn } from '../params/nrpn'
+import { incomingParser } from '../midi/incoming'
+import { decodeNrpn, encodeNrpn } from '../params/nrpn'
 import { PARAM_BY_KEY, Patch, param } from '../params/patch'
 import type { ParamDef } from '../params/types'
 import type { HydrasynthSession } from '../sysex/session'
@@ -42,6 +43,8 @@ export interface SyncState {
   /** What Undo / Redo would take back or redo, or null. */
   undoLabel: string | null
   redoLabel: string | null
+  /** The synth changed patch from its panel: it no longer plays the one open here. */
+  synthSwitched: Slot | null
 }
 
 export interface PatchSyncOptions {
@@ -72,6 +75,7 @@ export class PatchSync {
     revision: 0,
     undoLabel: null,
     redoLabel: null,
+    synthSwitched: null,
   }
   private listeners = new Set<(s: SyncState) => void>()
   private fullSendTimer: ReturnType<typeof setTimeout> | null = null
@@ -83,6 +87,8 @@ export class PatchSync {
   private readonly queue: NrpnQueue
   private channel: number
 
+  private readonly stopListening: () => void
+
   constructor(private readonly options: PatchSyncOptions) {
     this.channel = options.channel
     this.queue = new NrpnQueue({
@@ -90,6 +96,19 @@ export class PatchSync {
       channel: () => this.channel,
       idle: () => options.session.idle(),
     })
+    // The synth's panel: knobs (NRPN) and patch changes.
+    this.stopListening = options.session.listen(
+      incomingParser(() => this.channel, {
+        nrpn: (number, value) => {
+          const patch = this.state.patch
+          const hit = patch && decodeNrpn(number, value, (d) => patch.isActive(d))
+          if (hit) this.received(hit.def.key, hit.value)
+        },
+        program: (bank, patch) => {
+          if (this.state.patch && !this.state.busy) this.update({ synthSwitched: { bank, patch }, playing: { kind: 'slot', slot: { bank, patch } } })
+        },
+      }),
+    )
   }
 
   get(): SyncState {
@@ -115,7 +134,7 @@ export class PatchSync {
       this.inactiveValues.clear()
       this.history.reset()
       this.baseline = new Uint8Array(bytes)
-      this.update({ patch: new Patch(bytes), origin: slot, dirty: false, playing: { kind: 'slot', slot } })
+      this.update({ patch: new Patch(bytes), origin: slot, dirty: false, playing: { kind: 'slot', slot }, synthSwitched: null })
     })
   }
 
@@ -129,7 +148,7 @@ export class PatchSync {
     this.inactiveValues.clear()
     this.history.reset()
     this.baseline = dirty ? null : new Uint8Array(patch.bytes)
-    this.update({ patch: patch.clone(), origin: null, dirty })
+    this.update({ patch: patch.clone(), origin: null, dirty, synthSwitched: null })
     await this.audition()
   }
 
@@ -145,6 +164,28 @@ export class PatchSync {
 
   /** Sets a param, sends it live if NRPN can carry it, else schedules a whole-patch send. */
   set(key: string, value: number) {
+    this.apply(key, value, 'editor')
+  }
+
+  /**
+   * A param turned on the synth's panel (its NRPN, decoded): the patch follows, as an undoable
+   * edit, and nothing goes back -- except, after a mode switch, the new mode's values, since
+   * the synth sends only the switch (an FX type change came without its five params).
+   * A value for a mode that isn't active is kept for when it is: on BPM sync the synth sends
+   * the synced Delay first, then the switch.
+   */
+  received(key: string, value: number) {
+    const patch = this.state.patch
+    if (!patch || this.state.synthSwitched || this.state.busy) return
+    const def = param(key)
+    if (!patch.isActive(def)) {
+      this.inactiveValues.set(key, value)
+      return
+    }
+    this.apply(key, value, 'synth')
+  }
+
+  private apply(key: string, value: number, from: 'editor' | 'synth') {
     const patch = this.requirePatch()
     const def = param(key)
     if (patch.get(key) === Math.max(def.min, Math.min(def.max, Math.round(value)))) return
@@ -168,6 +209,8 @@ export class PatchSync {
     }
     let needsFullSend = false
     for (const d of changed) {
+      // The synth has what it sent us.
+      if (from === 'synth' && d === def) continue
       // An FX preset's NRPN makes the synth load that preset over the type's params; on a type
       // switch that would undo the values just sent, so only a preset picked on purpose goes out.
       // (Its byte still changes, and goes with the next whole-patch send or Write.)
@@ -231,7 +274,7 @@ export class PatchSync {
       const patch = this.requirePatch()
       await this.options.session.uploadToRam(AUDITION_SLOT.bank, AUDITION_SLOT.patch, patch.bytes)
       await this.options.session.reloadSlot(this.channel, AUDITION_SLOT.bank, AUDITION_SLOT.patch)
-      this.update({ playing: { kind: 'audition' }, pendingFullSend: false })
+      this.update({ playing: { kind: 'audition' }, pendingFullSend: false, synthSwitched: null })
     })
   }
 
@@ -258,6 +301,7 @@ export class PatchSync {
   }
 
   dispose() {
+    this.stopListening()
     this.cancelFullSend()
     this.queue.clear()
     this.listeners.clear()

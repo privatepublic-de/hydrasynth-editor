@@ -65,6 +65,40 @@ function DiscardDialog({ next, onConfirm, onCancel }: { next: Replacement; onCon
   )
 }
 
+/**
+ * The synth changed patch from its panel: what's open here no longer sounds, and its knobs now
+ * change the other patch. Opens that one (discarding unwritten changes, said so) or keeps editing.
+ */
+function SynthSwitchedDialog({ slot, onOpen, onKeep }: { slot: Slot; onOpen: () => void; onKeep: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null)
+  const name = useEditor((s) => s.sync?.patch?.name ?? '')
+  const dirty = useEditor((s) => !!s.sync?.dirty)
+  const target = useEditor((s) => s.bankNames[slot.bank]?.[slot.patch])
+  const loadBankNames = useEditor((s) => s.loadBankNames)
+  useEffect(() => {
+    ref.current?.showModal()
+    if (!target) loadBankNames(slot.bank).catch(() => undefined)
+  }, [])
+  const there = `${slotName(slot)}${target ? ` “${target}”` : ''}`
+  return (
+    <dialog ref={ref} className="write-dialog" onCancel={onKeep}>
+      <h2>The synth switched to {there}</h2>
+      <p>
+        Its knobs now change {slotName(slot)}, and “{name}”, open here, no longer sounds.
+        {dirty && ` Your changes to “${name}” haven’t been written to the synth.`}
+      </p>
+      <div className="write-dialog__actions">
+        <button type="button" className="function-button" onClick={onKeep}>
+          Keep editing
+        </button>
+        <button type="button" className="function-button function-button--primary" onClick={onOpen} autoFocus>
+          {dirty ? `Discard changes, open ${slotName(slot)}` : `Open ${slotName(slot)}`}
+        </button>
+      </div>
+    </dialog>
+  )
+}
+
 /** Less frequent actions: backup and restore. */
 function MoreMenu() {
   const [open, setOpen] = useState(false)
@@ -165,7 +199,9 @@ function Status() {
   if (!sync) return null
   const [text, kind] = sync.error
     ? [sync.error, 'error']
-    : sync.busy
+    : sync.synthSwitched
+      ? [`Synth is on ${slotName(sync.synthSwitched)}: its knobs no longer change this patch`, 'busy']
+      : sync.busy
       ? [`${sync.busy}…`, 'busy']
       : sync.pendingFullSend
         ? ['Sending the whole patch in a moment', '']
@@ -202,6 +238,8 @@ export function PatchBar() {
   useEditor((s) => s.sync?.revision)
   const [chosen, setChosen] = useState<Slot>({ bank: 0, patch: 0 })
   const [pending, setPending] = useState<Replacement | null>(null)
+  /** The synth patch change last answered with "Keep editing" (each change is a new object). */
+  const [dismissedSwitch, setDismissedSwitch] = useState<Slot | null>(null)
   const initPatch = useEditor((s) => s.initPatch)
   const replace = (next: Replacement) => (next.kind === 'init' ? void initPatch() : void open(next.slot))
   const ask = (next: Replacement) => (sync?.patch && sync.dirty ? setPending(next) : replace(next))
@@ -296,8 +334,21 @@ export function PatchBar() {
         </>
       )}
       <Status />
+      {sync?.synthSwitched && !sync.busy && (
+        <button type="button" className="function-button function-button--primary" onClick={() => ask({ kind: 'slot', slot: sync.synthSwitched! })}>
+          Open {slotName(sync.synthSwitched)}
+        </button>
+      )}
       <MoreMenu />
       {writing && patch && <WriteDialog initial={sync?.origin ?? chosen} onClose={() => setWriting(false)} />}
+      {sync?.synthSwitched && !sync.busy && sync.synthSwitched !== dismissedSwitch && !pending && (
+        <SynthSwitchedDialog
+          key={`${sync.synthSwitched.bank}:${sync.synthSwitched.patch}`}
+          slot={sync.synthSwitched}
+          onKeep={() => setDismissedSwitch(sync.synthSwitched)}
+          onOpen={() => replace({ kind: 'slot', slot: sync.synthSwitched! })}
+        />
+      )}
       {pending && (
         <DiscardDialog
           next={pending}

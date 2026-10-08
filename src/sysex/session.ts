@@ -73,6 +73,13 @@ export class HydrasynthSession {
     this.unsubscribe = transport.subscribe((m) => this.receive(m))
   }
 
+  /** Channel messages from the synth (knob NRPNs, program changes); SysEx stays with the session. */
+  listen(listener: (message: Uint8Array) => void): () => void {
+    return this.transport.subscribe((m) => {
+      if (m[0] !== 0xf0) listener(m)
+    })
+  }
+
   dispose() {
     this.unsubscribe()
     for (const w of this.waiters) {

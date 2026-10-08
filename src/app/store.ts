@@ -278,6 +278,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         origin: { bank: 0, patch: 0 },
         dirty: false,
         playing: { kind: 'unknown' },
+        synthSwitched: null,
         pendingFullSend: false,
         busy: null,
         error: null,

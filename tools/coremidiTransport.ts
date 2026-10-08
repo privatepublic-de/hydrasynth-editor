@@ -17,20 +17,42 @@ export async function connectHelper(portPattern = /hydrasynth/i): Promise<Helper
   const replies = new Map<number, (r: any) => void>()
   let nextId = 1
   let pending: number[] = []
+  let running = 0
+  const emit = (bytes: number[]) => {
+    const m = Uint8Array.from(bytes)
+    for (const l of listeners) l(m)
+  }
+  /** Bytes in a channel message by status: program change and channel pressure have one data byte. */
+  const channelLength = (status: number) => ((status & 0xf0) === 0xc0 || (status & 0xf0) === 0xd0 ? 2 : 3)
 
   lines.on('line', (line) => {
     const msg = JSON.parse(line)
     if (msg.event === 'data') {
-      // The helper passes raw byte runs; reassemble whole SysEx messages.
+      // The helper passes raw byte runs; reassemble whole messages: SysEx, and channel messages
+      // (with running status), as Web MIDI delivers them. Real-time bytes are dropped.
       for (const b of Buffer.from(msg.data, 'base64')) {
-        if (b === 0xf0) pending = [b]
-        else if (pending.length) {
+        if (b >= 0xf8) continue
+        if (b === 0xf0) {
+          pending = [b]
+          continue
+        }
+        if (pending[0] === 0xf0) {
           pending.push(b)
           if (b === 0xf7) {
-            const m = Uint8Array.from(pending)
+            emit(pending)
             pending = []
-            for (const l of listeners) l(m)
           }
+          continue
+        }
+        if (b & 0x80) {
+          running = b < 0xf0 ? b : 0
+          pending = [b]
+        } else if (!pending.length && running) pending = [running, b]
+        else if (pending.length) pending.push(b)
+        else continue
+        if (pending.length === channelLength(pending[0])) {
+          emit(pending)
+          pending = []
         }
       }
     } else if (msg.id != null && replies.has(msg.id)) {
