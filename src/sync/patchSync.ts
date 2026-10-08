@@ -131,6 +131,16 @@ export class PatchSync {
     await this.audition()
   }
 
+  /**
+   * Takes over the patch a previous connection had open (after a reconnect), without sending
+   * anything: what the synth plays now is unknown until the next edit, open or send.
+   */
+  adopt(previous: SyncState) {
+    if (!previous.patch) return
+    this.baseline = previous.dirty ? null : new Uint8Array(previous.patch.bytes)
+    this.update({ patch: previous.patch.clone(), origin: previous.origin, dirty: previous.dirty, playing: { kind: 'unknown' } })
+  }
+
   /** Sets a param, sends it live if NRPN can carry it, else schedules a whole-patch send. */
   set(key: string, value: number) {
     const patch = this.requirePatch()

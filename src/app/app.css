@@ -1056,3 +1056,55 @@ select {
 .wave-cell--off {
   align-content: start;
 }
+
+/* --- more menu, backup dialog ----------------------------------------------------------- */
+.more-menu {
+  position: relative;
+}
+
+.more-menu__list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  white-space: nowrap;
+}
+
+.backup-dialog {
+  min-width: 420px;
+}
+
+.backup-dialog__banks {
+  display: flex;
+  gap: 14px;
+  border: 0;
+  padding: 0;
+  margin: 12px 0;
+}
+
+.backup-dialog__banks legend {
+  color: var(--print);
+  margin-bottom: 6px;
+}
+
+.backup-dialog__banks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 600 15px/1 var(--label);
+}
+
+.backup-dialog__note {
+  color: var(--print);
+}
+
+.backup-dialog__progress {
+  width: 100%;
+  height: 10px;
+  accent-color: var(--access);
+}
+
+.backup-dialog__banks input {
+  accent-color: var(--access);
+  width: 16px;
+  height: 16px;
+}

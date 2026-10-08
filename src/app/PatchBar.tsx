@@ -94,6 +94,46 @@ function DiscardDialog({ next, onConfirm, onCancel }: { next: Replacement; onCon
   )
 }
 
+/** Less frequent actions: backup now, restore later. */
+function MoreMenu() {
+  const [open, setOpen] = useState(false)
+  const openBackup = useEditor((s) => s.openBackup)
+  const ref = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+    const away = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false)
+    const escape = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    window.addEventListener('pointerdown', away)
+    window.addEventListener('keydown', escape)
+    return () => {
+      window.removeEventListener('pointerdown', away)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [open])
+  return (
+    <span className="more-menu" ref={ref}>
+      <button type="button" className="function-button" aria-label="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        ⋯
+      </button>
+      {open && (
+        <div className="param-menu more-menu__list" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              openBackup()
+            }}
+          >
+            Back up the synth…
+          </button>
+        </div>
+      )}
+    </span>
+  )
+}
+
 /** Undo / Redo, named after the step they'd take back or redo. */
 function UndoRedo() {
   const undoLabel = useEditor((s) => s.sync?.undoLabel ?? null)
@@ -262,6 +302,7 @@ export function PatchBar() {
         </>
       )}
       <Status />
+      <MoreMenu />
       {writing && patch && <WriteDialog initial={sync?.origin ?? chosen} onClose={() => setWriting(false)} />}
       {pending && (
         <DiscardDialog

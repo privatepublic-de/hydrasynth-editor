@@ -8,6 +8,8 @@ import { parseChunk } from '../sysex/protocol'
 import { HydrasynthSession } from '../sysex/session'
 import { destinationOf, freeMacroSlot, freeRoute, type Modulation } from '../ui/modDestinations'
 import demoDump from '../../test/fixtures/sawexpressive.syx.hex?raw'
+import { inSlotOrder, runBackup, type BackupProgress } from '../library/backup'
+import { backupFileName, encodeBackup, type StoredPatch } from '../library/backupFile'
 import { History } from '../sync/history'
 import { PatchSync, labelFor, type Slot, type SyncState } from '../sync/patchSync'
 
@@ -17,6 +19,17 @@ export type Connection =
   | { status: 'connected'; port: string }
   | { status: 'failed'; message: string }
   | { status: 'demo' }
+
+export interface BackupState {
+  phase: 'choose' | 'running' | 'stopped' | 'done'
+  banks: number[]
+  progress: BackupProgress | null
+  /** Why a run stopped early (cancelled, a patch that didn't come through, the port gone). */
+  stopped?: string
+  retries: number
+  /** Patches read so far for the chosen banks. */
+  count: number
+}
 
 interface EditorState {
   connection: Connection
@@ -32,6 +45,15 @@ interface EditorState {
   addRoute(key: string): number | undefined
   /** Adds `key`'s destination to a free slot of a macro; returns the slot, if one was free. */
   addToMacro(key: string, macro: number): number | undefined
+  /** The backup dialog's state; null while it's closed. */
+  backup: BackupState | null
+  openBackup(): void
+  closeBackup(): void
+  /** Reads the chosen banks, or after a stop only the patches still missing. */
+  startBackup(banks: number[]): Promise<void>
+  cancelBackup(): void
+  /** Offers the patches read so far as a .syx download. */
+  saveBackupFile(): void
   /** The param context menu, at a viewport position. */
   menu: { x: number; y: number; key: string } | null
   openMenu(key: string, x: number, y: number): void
@@ -60,6 +82,9 @@ interface EditorState {
 }
 
 let session: HydrasynthSession | null = null
+/** Patches read by the current backup run (kept across a stop, so Continue reads only the rest). */
+let backupHave = new Map<string, StoredPatch>()
+let backupAbort: AbortController | null = null
 let patchSync: PatchSync | null = null
 
 const CHANNEL_KEY = 'hydrasynth-editor.channel'
@@ -80,6 +105,55 @@ export const useEditor = create<EditorState>((set, get) => ({
   module: 'osc1',
   reveal: null,
   menu: null,
+  backup: null,
+
+  openBackup() {
+    backupHave = new Map()
+    set({ backup: { phase: 'choose', banks: [0, 1, 2, 3, 4, 5, 6, 7], progress: null, retries: 0, count: 0 } })
+  },
+
+  closeBackup() {
+    backupAbort?.abort()
+    backupHave = new Map()
+    set({ backup: null })
+  },
+
+  async startBackup(banks) {
+    if (!session || get().backup?.phase === 'running') return
+    const update = (b: Partial<BackupState>) => set((s) => ({ backup: s.backup && { ...s.backup, ...b } }))
+    update({ phase: 'running', banks, stopped: undefined })
+    // Edits still on their way go out first; the backup then has the synth to itself.
+    await patchSync?.settled().catch(() => undefined)
+    backupAbort = new AbortController()
+    const retriesBefore = get().backup?.retries ?? 0
+    const result = await runBackup({
+      session,
+      banks,
+      have: backupHave,
+      signal: backupAbort.signal,
+      onProgress: (progress) => update({ progress, count: progress.done }),
+    }).catch((err: Error) => ({ stopped: err.message, retries: 0 }))
+    backupAbort = null
+    const count = inSlotOrder(backupHave, banks).length
+    const stopped = get().connection.status === 'connected' ? result.stopped : 'The synth\u2019s USB MIDI port disappeared.'
+    update({ phase: stopped ? 'stopped' : 'done', stopped, count, retries: retriesBefore + result.retries })
+  },
+
+  cancelBackup() {
+    backupAbort?.abort()
+  },
+
+  saveBackupFile() {
+    const b = get().backup
+    if (!b) return
+    const file = encodeBackup(inSlotOrder(backupHave, b.banks))
+    const url = URL.createObjectURL(new Blob([file as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = backupFileName()
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  },
 
   revealModulation(m, focusKey) {
     const rowKey = m.kind === 'matrix' ? `modmatrix${m.route}modtarget` : `macro${m.macro}target${m.slot}`
@@ -153,11 +227,21 @@ export const useEditor = create<EditorState>((set, get) => ({
         set({ connection: { status: 'failed', message: 'No Hydrasynth found. Check the USB cable and that the synth is on.' } })
         return
       }
+      // A reconnect keeps the patch being edited.
+      const previous = patchSync?.get()
       patchSync?.dispose()
       session?.dispose()
       session = new HydrasynthSession(webMidiTransport(ports), { timeoutMs: 3000 })
+      // The synth's USB port can vanish (a long run of dumps did that once): say so, and stop a backup.
+      access.onstatechange = (e) => {
+        const port = (e as MIDIConnectionEvent).port
+        if (!port || port.state !== 'disconnected' || (port.id !== ports.input.id && port.id !== ports.output.id)) return
+        backupAbort?.abort()
+        set({ connection: { status: 'failed', message: 'The synth\u2019s USB MIDI port disappeared. Check the cable, then connect again.' } })
+      }
       patchSync = new PatchSync({ session, channel: get().channel })
       patchSync.subscribe((s) => set({ sync: s }))
+      if (previous) patchSync.adopt(previous)
       set({ connection: { status: 'connected', port: ports.output.name ?? 'Hydrasynth' }, sync: patchSync.get() })
     } catch (err) {
       set({ connection: { status: 'failed', message: `MIDI access was refused or failed: ${(err as Error).message}` } })

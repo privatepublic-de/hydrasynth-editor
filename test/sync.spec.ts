@@ -147,6 +147,19 @@ describe('PatchSync', () => {
     expect(p[9 + 0]).toBe('S'.charCodeAt(0))
   })
 
+  it('keeps the patch being edited across a reconnect, sending nothing', async () => {
+    const { sync } = setup()
+    await settle(sync.open({ bank: 2, patch: 5 }))
+    sync.set('filter1cutoff', 700)
+    const synth2 = new FakeHydrasynth()
+    const sync2 = new PatchSync({ session: new HydrasynthSession(synth2), channel: 1 })
+    sync2.adopt(sync.get())
+    expect(sync2.get()).toMatchObject({ origin: { bank: 2, patch: 5 }, dirty: true, playing: { kind: 'unknown' } })
+    expect(sync2.get().patch!.get('filter1cutoff')).toBe(700)
+    expect(synth2.received).toEqual([])
+    expect(synth2.channelMessages).toEqual([])
+  })
+
   it('does not send anything for a value that did not change', async () => {
     const { synth, sync } = setup()
     await settle(sync.open({ bank: 0, patch: 0 }))

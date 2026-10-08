@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { ModuleEditor } from './ModuleEditor'
+import { BackupDialog } from './BackupDialog'
 import { ParamMenu } from './Modulation'
 import { ModuleSelect } from './ModuleSelect'
 import { Pads } from './Pads'
@@ -69,6 +70,7 @@ export function App() {
         <Pads />
       </footer>
       <ParamMenu />
+      <BackupDialog />
     </div>
   )
 }
