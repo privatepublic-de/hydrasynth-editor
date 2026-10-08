@@ -962,3 +962,24 @@ button.wave-thumb--off {
   border-top: 1px solid var(--edge);
   margin: 4px 2px;
 }
+
+/* Wavelist page heading: the fill controls sit at its right. */
+.page__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wavelist-fill {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  font: 400 13px/1 var(--text);
+}
+
+.wavelist-fill select,
+.wavelist-fill .function-button {
+  padding: 3px 8px;
+  font-size: 13px;
+}

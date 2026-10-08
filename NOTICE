@@ -17,3 +17,5 @@ Decode.java, converted to hex text.
 
 public/waves/ holds Thierry Rochebois Zic's Hydrasynth wave images, CC BY 4.0, as cut and
 colour-inverted by Sean Luke for Edisyn; see public/waves/README.txt.
+src/ui/waveFeatures.generated.ts is measured from those images (tools/analyzeWaves.ts):
+each wave's harmonic levels and roughness as the pictures show them.

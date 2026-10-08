@@ -6,6 +6,7 @@ import { isWaveKey, shownEntry, waveImage, waveOf } from '../ui/waves'
 import { ParamControl } from './controls/ParamControl'
 import { ModuleDisplay } from './ModuleDisplay'
 import { StepEditor } from './StepEditor'
+import { WavelistFill } from './WavelistFill'
 import { useEditor } from './store'
 
 /** The Desktop shows 8 characters of a macro name (A5's "FiltAtckMixer" reads "FiltAtck"). */
@@ -93,7 +94,10 @@ function PageView({ title, slots }: { title: string; slots: Slot[] }) {
   if (shown.every((k) => k === null)) return null
   return (
     <section className="page">
-      <h3 className="page__title">{title}</h3>
+      <h3 className="page__title">
+        {title}
+        {title === 'Wavelist' && shown[0] && <WavelistFill osc={Number(shown[0].match(/^osc(\d)/)![1])} />}
+      </h3>
       <div className="page__slots">
         {shown.map((key, i) =>
           key === null ? (
