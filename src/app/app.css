@@ -778,3 +778,59 @@ button.wave-thumb--off {
   stroke-width: 1;
   stroke-dasharray: 2 4;
 }
+
+/* --- editing in the display ---------------------------------------------------------- */
+.screen__graph--edit {
+  touch-action: none;
+}
+
+.screen__handle {
+  fill: #000;
+  stroke: var(--access);
+  stroke-width: 2;
+  cursor: grab;
+}
+
+.screen__handle:hover {
+  fill: var(--access);
+}
+
+.screen__handle:active {
+  cursor: grabbing;
+}
+
+.screen__stepper {
+  position: relative;
+  cursor: ew-resize;
+  touch-action: none;
+  border-radius: 3px;
+}
+
+.screen__stepper img {
+  user-select: none;
+}
+
+.screen__stepper-name {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font: 600 12px/1 var(--label);
+  color: var(--oled-text);
+  background: rgba(0, 0, 0, 0.75);
+  padding: 2px 6px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.screen__track {
+  position: relative;
+  height: 14px;
+  margin-top: 2px;
+  cursor: ew-resize;
+  touch-action: none;
+  border-bottom: 1px solid #1f262b;
+}
+
+.screen__track .screen__marker {
+  bottom: 0;
+}
