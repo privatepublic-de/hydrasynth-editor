@@ -37,8 +37,11 @@ export function App() {
           <MasterButtons />
         </div>
         <ModuleEditor />
-        <Pads />
       </div>
+      {/* Pinned to the window's bottom edge, so notes are always at hand while editing. */}
+      <footer className="pads-dock">
+        <Pads />
+      </footer>
     </div>
   )
 }

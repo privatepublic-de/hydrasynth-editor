@@ -42,7 +42,25 @@ input {
 .app {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 0 16px 24px;
+  /* Room for the pads dock, so the end of a page can scroll clear of it. */
+  padding: 0 16px 150px;
+}
+
+.pads-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  background: var(--panel);
+  border-top: 1px solid var(--edge);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.pads-dock .pads {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 10px 34px 12px;
 }
 
 /* --- patch bar: the Main Systems row ------------------------------------ */
