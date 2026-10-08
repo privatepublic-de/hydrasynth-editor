@@ -8,7 +8,7 @@
    ignored), sends what NRPN can't carry as a whole patch to H128 1 s after the last such
    edit, writes slots to flash (then 3.5 s quiet). Mode switches keep each mode's values
    apart, as the synth does (below).
-3. **Main view**: React + TypeScript, one screen. **Mirror the Desktop's own module-select
+3. **Main view** (first version 2026-10-08, `src/app/`, `src/ui/`): React + TypeScript, one screen. **Mirror the Desktop's own module-select
    buttons** (user, 2026-10-08): the panel's signal-flow row of buttons (OSC 1, OSC 2, OSC 3,
    MUTANT 1-4, MIXER, FILTER 1/2, AMP, ...) selects the section shown, as on the hardware.
    Take the exact button list and order from the Desktop's manual or a photo, not from memory,

@@ -3,87 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Hydrasynth Probe</title>
-    <style>
-      :root {
-        color-scheme: dark;
-        --bg: #15171a;
-        --panel: #1e2125;
-        --text: #d8dce0;
-        --muted: #7d858d;
-        --accent: #49c6b8;
-        --bad: #e5675c;
-      }
-      body {
-        margin: 0;
-        padding: 16px;
-        background: var(--bg);
-        color: var(--text);
-        font: 14px/1.4 system-ui, sans-serif;
-      }
-      h1 { font-size: 18px; margin: 0 0 12px; }
-      .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
-      button, select, input {
-        background: var(--panel);
-        color: var(--text);
-        border: 1px solid #343a40;
-        border-radius: 4px;
-        padding: 5px 10px;
-        font: inherit;
-      }
-      button:hover:not(:disabled) { border-color: var(--accent); }
-      button:disabled { opacity: 0.4; }
-      #status { color: var(--muted); }
-      #log {
-        background: var(--panel);
-        border-radius: 4px;
-        padding: 10px;
-        height: 60vh;
-        overflow: auto;
-        font: 12px/1.45 ui-monospace, Menlo, monospace;
-        white-space: pre-wrap;
-        word-break: break-all;
-      }
-      .ok { color: var(--accent); }
-      .bad { color: var(--bad); }
-      .dim { color: var(--muted); }
-    </style>
+    <title>Hydrasynth Editor</title>
   </head>
   <body>
-    <h1>Hydrasynth Web MIDI probe</h1>
-    <div class="row">
-      <button id="connect">Connect</button>
-      <span id="status">not connected</span>
-    </div>
-    <div class="row">
-      <button data-op="handshake" disabled>Handshake</button>
-      <button data-op="version" disabled>Version</button>
-      <select id="bank"></select>
-      <button data-op="names" disabled>Bank names</button>
-      <input id="patch" type="number" min="1" max="128" value="1" style="width: 5em" />
-      <button data-op="patch" disabled>Download patch</button>
-      <button data-op="stress" disabled>Download 16 patches</button>
-    </div>
-    <div class="row">
-      <label>MIDI channel <input id="channel" type="number" min="1" max="16" value="1" style="width: 4em" /></label>
-      <button data-op="h128" disabled>H128 round trip</button>
-      <span class="dim">reads H128, sends the same bytes back to working memory (no flash write), reloads it, reads it again</span>
-    </div>
-    <div class="row">
-      <strong>Live sync test</strong>
-      <button data-op="sync-open" disabled>Open (bank + patch above)</button>
-      <button data-op="sync-cutoffLow" disabled>Cutoff low</button>
-      <button data-op="sync-cutoffHigh" disabled>Cutoff high</button>
-      <button data-op="sync-fx" disabled>Pre-FX EQ params</button>
-      <button data-op="sync-bpm" disabled>Toggle Env 1 BPM sync</button>
-      <button data-op="sync-modeOnly" disabled>Env 1 BPM sync, mode only</button>
-      <button data-op="sync-full" disabled>Arp latch + macro name (whole patch)</button>
-    </div>
-    <div class="row">
-      <label><input id="raw" type="checkbox" /> show raw traffic</label>
-      <button id="clear">Clear log</button>
-    </div>
-    <div id="log"></div>
-    <script type="module" src="/src/probe.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/app/main.tsx"></script>
   </body>
 </html>

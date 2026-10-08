@@ -3,3 +3,5 @@ export const controlChange = (channel: number, cc: number, value: number) => [0x
 export const programChange = (channel: number, program: number) => [0xc0 | (channel - 1), program]
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+export const noteOn = (channel: number, note: number, velocity: number) => [0x90 | (channel - 1), note, velocity]
+export const noteOff = (channel: number, note: number) => [0x80 | (channel - 1), note, 0]
