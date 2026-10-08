@@ -22,7 +22,7 @@ function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot) => voi
         ))}
       </select>
       <select aria-label="Patch" value={slot.patch} onChange={(e) => onChange({ bank: slot.bank, patch: Number(e.target.value) })}>
-        {slot.patch === NOT_STORED && <option value={NOT_STORED}>New patch, not stored</option>}
+        {slot.patch === NOT_STORED && <option value={NOT_STORED}>Not stored</option>}
         {Array.from({ length: 128 }, (_, i) => (
           <option key={i} value={i}>
             {i + 1} {names?.[i] ?? ''}
@@ -125,23 +125,35 @@ function UndoRedo() {
   )
 }
 
+/** One line that takes the room left and is cut off with an ellipsis (full text on hover). */
 function Status() {
   const sync = useEditor((s) => s.sync)
   if (!sync) return null
-  if (sync.error) return <span className="status status--error">{sync.error}</span>
-  if (sync.busy) return <span className="status status--busy">{sync.busy}…</span>
-  if (sync.pendingFullSend) return <span className="status">Sending the whole patch in a moment</span>
-  const playing =
-    sync.playing.kind === 'slot'
-      ? `Playing ${slotName(sync.playing.slot)}`
-      : sync.playing.kind === 'audition'
-        ? 'Playing from H128 (scratch slot)'
-        : ''
+  const [text, kind] = sync.error
+    ? [sync.error, 'error']
+    : sync.busy
+      ? [`${sync.busy}…`, 'busy']
+      : sync.pendingFullSend
+        ? ['Sending the whole patch in a moment', '']
+        : sync.playing.kind === 'slot'
+          ? [`Playing ${slotName(sync.playing.slot)}`, '']
+          : sync.playing.kind === 'audition'
+            ? ['Playing from H128 (scratch slot)', '']
+            : ['', '']
   return (
-    <>
-      <span className="status">{playing}</span>
-      {sync.dirty && <span className="status status--dirty">Edited, not written</span>}
-    </>
+    <span className={`status patch-bar__status${kind ? ` status--${kind}` : ''}`} title={text} role="status">
+      {text}
+    </span>
+  )
+}
+
+/** Beside the name, with its room always kept so it doesn't move the bar when it appears. */
+function EditedMark() {
+  const dirty = useEditor((s) => !!s.sync?.dirty)
+  return (
+    <span className="edited-mark" title="Edited, not written" aria-hidden={!dirty} style={{ visibility: dirty ? 'visible' : 'hidden' }}>
+      Edited<span className="visually-hidden">, not written</span>
+    </span>
   )
 }
 
@@ -208,7 +220,7 @@ export function PatchBar() {
       <span className="patch-bar__port" title="MIDI port">
         {connection.port}
       </span>
-      <label className="patch-bar__channel">
+      <label className="patch-bar__channel" title={`MIDI channel of ${connection.port}`}>
         Channel
         <select value={channel} onChange={(e) => setChannel(Number(e.target.value))}>
           {Array.from({ length: 16 }, (_, i) => (
@@ -242,6 +254,7 @@ export function PatchBar() {
             value={patch.name}
             onChange={(e) => setName(e.target.value)}
           />
+          <EditedMark />
           <button type="button" className="function-button" onClick={() => setWriting(true)} disabled={!!sync?.busy}>
             Write…
           </button>

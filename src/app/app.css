@@ -64,12 +64,49 @@ input {
 }
 
 /* --- patch bar: the Main Systems row ------------------------------------ */
+/* One row of fixed height: nothing in it may push the panel down. */
 .patch-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 10px 14px;
-  padding: 14px 0;
+  gap: 8px;
+  height: 64px;
+  white-space: nowrap;
+}
+
+.patch-bar .slot-picker select:last-child {
+  max-width: 18ch;
+}
+
+/* What can go first when the window is narrow: the title, then the port's name. */
+@media (max-width: 1300px) {
+  .patch-bar .brand {
+    display: none;
+  }
+}
+
+@media (max-width: 1150px) {
+  .patch-bar__port {
+    display: none;
+  }
+}
+
+.patch-bar > * {
+  flex-shrink: 0;
+}
+
+.patch-bar__status {
+  flex: 1 1 auto;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.edited-mark {
+  font: 600 13px/1 var(--label);
+  color: var(--access);
+  margin-left: -6px;
 }
 
 .brand {
@@ -123,9 +160,6 @@ select {
   color: var(--lit);
 }
 
-.status--dirty {
-  color: var(--access);
-}
 
 .status--error {
   color: var(--alert);
