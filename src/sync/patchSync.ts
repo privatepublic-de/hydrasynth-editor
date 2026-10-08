@@ -105,12 +105,15 @@ export class PatchSync {
     })
   }
 
-  /** Edits a patch that isn't on the synth (a file): plays it through the audition slot. */
-  async load(patch: Patch) {
+  /**
+   * Edits a patch that isn't stored on the synth (a file, the Init patch): plays it through
+   * the audition slot. `dirty` says whether it counts as unwritten work from the start.
+   */
+  async load(patch: Patch, { dirty = true }: { dirty?: boolean } = {}) {
     this.cancelFullSend()
     this.queue.clear()
     this.inactiveValues.clear()
-    this.update({ patch: patch.clone(), origin: null, dirty: true })
+    this.update({ patch: patch.clone(), origin: null, dirty })
     await this.audition()
   }
 

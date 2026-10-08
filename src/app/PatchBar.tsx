@@ -3,6 +3,9 @@ import { BANK_LETTERS } from '../sysex/protocol'
 import { slotName, type Slot } from '../sync/patchSync'
 import { useEditor } from './store'
 
+/** The patch selector's value while the open patch (Init, a file) isn't stored in a slot. */
+const NOT_STORED = -1
+
 function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot) => void }) {
   const names = useEditor((s) => s.bankNames[slot.bank])
   const loadBankNames = useEditor((s) => s.loadBankNames)
@@ -19,6 +22,7 @@ function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot) => voi
         ))}
       </select>
       <select aria-label="Patch" value={slot.patch} onChange={(e) => onChange({ bank: slot.bank, patch: Number(e.target.value) })}>
+        {slot.patch === NOT_STORED && <option value={NOT_STORED}>New patch, not stored</option>}
         {Array.from({ length: 128 }, (_, i) => (
           <option key={i} value={i}>
             {i + 1} {names?.[i] ?? ''}
@@ -65,24 +69,25 @@ function WriteDialog({ initial, onClose }: { initial: Slot; onClose: () => void 
 }
 
 /** Asks before a newly picked patch replaces one with unsaved changes. */
-function DiscardDialog({ slot, onConfirm, onCancel }: { slot: Slot; onConfirm: () => void; onCancel: () => void }) {
+/** What would replace the patch being edited: a stored slot, or the Init patch. */
+type Replacement = { kind: 'slot'; slot: Slot } | { kind: 'init' }
+
+function DiscardDialog({ next, onConfirm, onCancel }: { next: Replacement; onConfirm: () => void; onCancel: () => void }) {
   const ref = useRef<HTMLDialogElement>(null)
   const name = useEditor((s) => s.sync?.patch?.name ?? '')
-  const target = useEditor((s) => s.bankNames[slot.bank]?.[slot.patch])
+  const target = useEditor((s) => (next.kind === 'slot' ? s.bankNames[next.slot.bank]?.[next.slot.patch] : undefined))
   useEffect(() => ref.current?.showModal(), [])
+  const what = next.kind === 'init' ? 'Starting from the Init patch' : `Opening ${slotName(next.slot)}${target ? ` “${target}”` : ''}`
   return (
     <dialog ref={ref} className="write-dialog" onCancel={onCancel}>
       <h2>Discard changes to “{name}”?</h2>
-      <p>
-        Opening {slotName(slot)}
-        {target ? ` “${target}”` : ''} replaces the patch you’re editing. Its changes haven’t been written to the synth.
-      </p>
+      <p>{what} replaces the patch you’re editing. Its changes haven’t been written to the synth.</p>
       <div className="write-dialog__actions">
         <button type="button" className="function-button" onClick={onCancel} autoFocus>
           Cancel
         </button>
         <button type="button" className="function-button function-button--primary" onClick={onConfirm}>
-          Discard changes and open
+          {next.kind === 'init' ? 'Discard changes and init' : 'Discard changes and open'}
         </button>
       </div>
     </dialog>
@@ -119,16 +124,25 @@ export function PatchBar() {
   const setName = useEditor((s) => s.setName)
   useEditor((s) => s.sync?.revision)
   const [chosen, setChosen] = useState<Slot>({ bank: 0, patch: 0 })
-  const [pending, setPending] = useState<Slot | null>(null)
+  const [pending, setPending] = useState<Replacement | null>(null)
+  const initPatch = useEditor((s) => s.initPatch)
+  const replace = (next: Replacement) => (next.kind === 'init' ? void initPatch() : void open(next.slot))
+  const ask = (next: Replacement) => (sync?.patch && sync.dirty ? setPending(next) : replace(next))
   const [writing, setWriting] = useState(false)
   // The selectors show the open patch's slot; while asking or loading, the one picked. A
   // cancelled or failed open leaves them back on the open patch.
-  const slot = pending ?? (sync?.busy ? chosen : (sync?.origin ?? chosen))
+  const slot =
+    pending?.kind === 'slot'
+      ? pending.slot
+      : sync?.busy
+        ? chosen
+        : sync?.patch && !sync.origin
+          ? { bank: chosen.bank, patch: NOT_STORED }
+          : (sync?.origin ?? chosen)
   const pick = (next: Slot) => {
     setChosen(next)
     if (!sync?.patch) return // nothing open yet: the Open button loads it
-    if (sync.dirty) setPending(next)
-    else void open(next)
+    ask({ kind: 'slot', slot: next })
   }
   const patch = sync?.patch
 
@@ -178,6 +192,15 @@ export function PatchBar() {
           Open {slotName(slot)}
         </button>
       )}
+      <button
+        type="button"
+        className="function-button"
+        title="Start a new patch from the synth's Init patch, played from H128"
+        onClick={() => ask({ kind: 'init' })}
+        disabled={!!sync?.busy}
+      >
+        Init
+      </button>
       {patch && (
         <>
           <input
@@ -193,14 +216,14 @@ export function PatchBar() {
         </>
       )}
       <Status />
-      {writing && patch && <WriteDialog initial={sync?.origin ?? slot} onClose={() => setWriting(false)} />}
+      {writing && patch && <WriteDialog initial={sync?.origin ?? chosen} onClose={() => setWriting(false)} />}
       {pending && (
         <DiscardDialog
-          slot={pending}
+          next={pending}
           onCancel={() => setPending(null)}
           onConfirm={() => {
             setPending(null)
-            void open(pending)
+            replace(pending)
           }}
         />
       )}

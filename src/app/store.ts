@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { noteOff, noteOn } from '../midi/channel'
 import { findHydrasynth, requestWebMidi, webMidiTransport } from '../midi/transport'
+import { initPatchBytes } from '../params/initPatch'
 import { Patch } from '../params/patch'
 import { decodeMessage } from '../sysex/codec'
 import { parseChunk } from '../sysex/protocol'
@@ -43,6 +44,8 @@ interface EditorState {
   setChannel(channel: number): void
   loadBankNames(bank: number): Promise<void>
   open(slot: Slot): Promise<void>
+  /** Starts from the synth's Init patch, played from H128. */
+  initPatch(): Promise<void>
   set(key: string, value: number): void
   setName(name: string): void
   setMacroName(macro: number, name: string): void
@@ -167,6 +170,10 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   async open(slot) {
     await patchSync?.open(slot).catch(() => undefined) // the error is in sync.error
+  },
+
+  async initPatch() {
+    await patchSync?.load(new Patch(initPatchBytes()), { dirty: false }).catch(() => undefined) // the error is in sync.error
   },
 
   set(key, value) {
