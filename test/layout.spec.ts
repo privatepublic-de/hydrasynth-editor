@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PARAMS } from '../src/params/generated'
+import { FX_PRESET_PARAMS } from '../src/params/fxPresets'
 import { param } from '../src/params/patch'
 import { MODULES, moduleOf, slotKeys } from '../src/ui/layout'
 
@@ -7,12 +8,13 @@ const placed = MODULES.flatMap((m) => m.pages.flatMap((p) => p.slots.flatMap(slo
 
 describe('module layout', () => {
   it('places every param exactly once', () => {
-    const known = new Set(PARAMS.map((p) => p.key))
+    const all = [...PARAMS, ...FX_PRESET_PARAMS]
+    const known = new Set(all.map((p) => p.key))
     const seen = new Set<string>()
     const dupes = placed.filter((k) => seen.has(k) || !seen.add(k))
     expect(dupes).toEqual([])
     expect(placed.filter((k) => !known.has(k))).toEqual([])
-    expect(PARAMS.map((p) => p.key).filter((k) => !seen.has(k))).toEqual([])
+    expect(all.map((p) => p.key).filter((k) => !seen.has(k))).toEqual([])
   })
 
   it('fits every page on the eight Control knobs', () => {

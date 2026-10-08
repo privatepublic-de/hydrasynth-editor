@@ -1,10 +1,11 @@
 // A patch is its 2790 bytes as the synth sends them; every parameter is a view onto
 // them. Editing in place keeps all the bytes nobody has decoded yet exactly as they were.
 import { PATCH_BYTES } from '../sysex/protocol'
+import { FX_PRESET_PARAMS, withKnob2Condition } from './fxPresets'
 import { MOD_DESTINATION_CATEGORIES, PARAMS } from './generated'
 import type { ByteField, Condition, ParamDef } from './types'
 
-export const PARAM_BY_KEY: ReadonlyMap<string, ParamDef> = new Map(PARAMS.map((p) => [p.key, p]))
+export const PARAM_BY_KEY: ReadonlyMap<string, ParamDef> = new Map([...PARAMS.map(withKnob2Condition), ...FX_PRESET_PARAMS].map((p) => [p.key, p]))
 
 const NAME = { offset: 9, length: 16 }
 /** 16 characters + NUL each. Edisyn assumes 8, but factory patches use more ("Tremolo-Darken"). */

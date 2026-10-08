@@ -53,13 +53,16 @@
   two codes for Vowel. Shown as Vowel and kept as stored (`src/params/overrides.ts`).
 - A38's Pre-FX matches the model exactly: EQ, Low/High Gain -36.0 dB, Mid 0.0 dB, Xover
   394/1376 Hz, Dry/Wet 0.0 % (the screen also names a preset, "Lo-Fi"). FX sidechain isn't
-  shown for EQ, so the stored 5 there is presumably a leftover the synth ignores.
+  shown for EQ: the stored 5 there is the preset, see below.
 - Macro names: the Desktop shows 8 characters (A5's "FiltAtckMixer" reads "FiltAtck").
   The UI shows and edits 8; longer stored names are kept unless edited.
 
 - A34 "Ancient Log KFP" matches the model too: Pre-FX Tremolo; Post-FX EQ (preset "Warm"),
   1.5 / -4.2 / 1.0 dB, 768 / 7600 Hz, 100 %.
-- The screen names an FX preset ("Lo-Fi", "Warm"); where the patch stores it is not mapped yet.
+- The screen names an FX preset ("Lo-Fi", "Warm"): it's knob 2's byte (354 Pre, 402 Post), which
+  Edisyn calls Sidechain and which is Sidechain only on the Compressor. A38 stores 5 (EQ "Lo-Fi"),
+  A34's Post-FX 6 ("Warm"); every FX slot with presets in all banks holds a valid number. The
+  name stays after its values are edited (A34's High Gain). `src/params/fxPresets.ts`.
 
 - Live NRPN (filter cutoff), FX params by NRPN (Pre-FX EQ Low Gain -0.7 dB, Xover Lo 600 Hz),
   a BPM sync switch, and a whole-patch send to H128 (Arp Latch, Macro 1 name) all showed the

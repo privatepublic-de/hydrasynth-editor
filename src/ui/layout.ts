@@ -2,6 +2,7 @@
 // pages, after the owner's manual. A slot's index is the Control knob it sits on (0 = knob 1;
 // knobs 1-4 are the top row, 5-8 the bottom), so a null keeps the knobs after it in place.
 // Kept by hand on purpose (docs/PLAN.md): the generated param data has no notion of pages.
+import { PARAM_BY_KEY } from '../params/patch'
 
 /**
  * One param key; several keys = the readings of one knob in different modes (exactly one is
@@ -158,9 +159,14 @@ function fx(where: 'pre' | 'post'): ModuleLayout {
     pages: [
       {
         title: 'FX',
-        // Knob 2 is the type's Preset (a template that sets the other knobs, not stored) except on
-        // the Compressor, where it is Sidechain; the model doesn't tie Sidechain to that type.
-        slots: [`${p}type`, `${p}sidechain`, ...range(5).map((m) => range(9).map((t) => `${p}${t}param${m}`)), `${p}wet`],
+        // Knob 2 is the type's Preset (which also sets the other knobs) except on the Compressor,
+        // where it is Sidechain; both are kept in the same byte (see params/fxPresets.ts).
+        slots: [
+          `${p}type`,
+          [`${p}sidechain`, ...range(9).map((t) => `${p}${t}preset`).filter((k) => PARAM_BY_KEY.has(k))],
+          ...range(5).map((m) => range(9).map((t) => `${p}${t}param${m}`)),
+          `${p}wet`,
+        ],
       },
     ],
   }

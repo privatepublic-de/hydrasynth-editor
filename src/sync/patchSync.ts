@@ -13,6 +13,8 @@ import { moduleOf } from '../ui/layout'
 import { History, type Snapshot } from './history'
 import { NrpnQueue } from './nrpnQueue'
 
+const FX_PRESET = /^(pre|post)fx\d+preset$/
+
 export interface Slot {
   bank: number
   patch: number
@@ -166,6 +168,10 @@ export class PatchSync {
     }
     let needsFullSend = false
     for (const d of changed) {
+      // An FX preset's NRPN makes the synth load that preset over the type's params; on a type
+      // switch that would undo the values just sent, so only a preset picked on purpose goes out.
+      // (Its byte still changes, and goes with the next whole-patch send or Write.)
+      if (d !== def && FX_PRESET.test(d.key)) continue
       const msg = this.liveNrpn(d) ? encodeNrpn(d, patch.get(d.key)) : null
       if (msg) this.queue.push(d.key, msg, isLeadKey(d.key))
       else needsFullSend = true
@@ -274,6 +280,8 @@ export class PatchSync {
       // A param whose mode changed is sent too: the synth keeps each mode's own value.
       const modeChanged = !!def.when && before.get(def.when.key) !== patch.get(def.when.key)
       if (before.get(def.key) === patch.get(def.key) && !modeChanged) continue
+      // As on a type switch: a preset's NRPN would load it over the values restored here.
+      if (FX_PRESET.test(def.key)) continue
       const msg = this.liveNrpn(def) ? encodeNrpn(def, patch.get(def.key)) : null
       if (msg) this.queue.push(def.key, msg, isLeadKey(def.key))
       else needsFullSend = true

@@ -12,6 +12,7 @@ export function formatValue(def: ParamDef, value: number): string {
     const named = CHOICE_TABLES[PARAMS.find((p) => p.key === source)!.choices!].find(([v]) => v === value)
     if (named) return named[1]
   }
+  if (def.options) return def.options.find(([v]) => v === value)?.[1] ?? String(value)
   if (def.display !== undefined) return DISPLAY_TABLES[def.display][value - def.min] ?? String(value)
   if (def.choices !== undefined) return CHOICE_TABLES[def.choices].find(([v]) => v === value)?.[1] ?? String(value)
   if (def.widget === 'check') return value ? 'On' : 'Off'
@@ -19,7 +20,7 @@ export function formatValue(def: ParamDef, value: number): string {
 }
 
 export function choicesOf(def: ParamDef): [number, string][] {
-  return def.choices !== undefined ? CHOICE_TABLES[def.choices] : []
+  return def.options ?? (def.choices !== undefined ? CHOICE_TABLES[def.choices] : [])
 }
 
 const ZERO_LABEL = /^[-+]?0([.,]0*)?\s*(%|dB)?$/

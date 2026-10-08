@@ -12,6 +12,7 @@ import { inSlotOrder, runBackup, type BackupProgress } from '../library/backup'
 import { BackupFileError, backupFileName, decodeBackup, encodeBackup, type StoredPatch } from '../library/backupFile'
 import { runRestore, type RestoreItem, type RestoreProgress, type RestoreResult } from '../library/restore'
 import { History } from '../sync/history'
+import { fxPresetValues } from '../params/fxPresets'
 import { PatchSync, labelFor, type Slot, type SyncState } from '../sync/patchSync'
 
 export type Connection =
@@ -344,6 +345,14 @@ export const useEditor = create<EditorState>((set, get) => ({
   set(key, value) {
     const put = (k: string, v: number) => (patchSync ? patchSync.set(k, v) : demoEdit(set, get, (p) => p.set(k, v), k, labelFor(k)))
     const patch = get().sync?.patch
+    // An FX preset sets the type's five params too, in the same undo step.
+    const preset = fxPresetValues(key, value)
+    if (preset) {
+      return get().grouped(labelFor(key), () => {
+        put(key, value)
+        for (const [k, v] of preset) put(k, v)
+      })
+    }
     const depth = patch && newSlotDepth(patch, key, value)
     if (!depth) return put(key, value)
     // A new route or macro slot starts with no depth, the same undo step.

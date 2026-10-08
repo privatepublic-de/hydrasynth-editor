@@ -40,7 +40,9 @@ export interface ParamDef {
   displayOffset?: number
   /** ... or DISPLAY_TABLES[display][v - min] ... */
   display?: number
-  /** ... or CHOICE_TABLES[choices] as [value, label] pairs. */
+  /** ... or CHOICE_TABLES[choices] as [value, label] pairs ... */
   choices?: number
+  /** ... or these [value, label] pairs (params defined here, not from Edisyn's tables). */
+  options?: [number, string][]
   nrpn?: NrpnSpec
 }
