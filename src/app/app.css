@@ -298,10 +298,12 @@ select {
   letter-spacing: 0.04em;
 }
 
-/* Pages are the synth's: knobs 1-4 above 5-8. They flow side by side when there's room. */
+/* Pages are the synth's: knobs 1-4 above 5-8. They flow side by side when there's room;
+   unused columns collapse and the rest stay centred, whatever the module's page count. */
 .module-editor__pages {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(390px, 1fr));
+  grid-template-columns: repeat(auto-fit, min(100%, 420px));
+  justify-content: center;
   gap: 18px 28px;
   align-items: start;
 }
