@@ -2,7 +2,8 @@
   "name": "hydrasynth-editor",
   "version": "0.0.1",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 5179 --strictPort",
+    "start": "npm run build && vite preview --port 5179 --strictPort --open",
     "build": "tsc && vite build",
     "test": "vitest run",
     "typecheck": "tsc"

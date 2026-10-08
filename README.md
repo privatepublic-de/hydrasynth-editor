@@ -2,9 +2,29 @@
 
 A patch editor for the ASM Hydrasynth (Desktop first), over USB MIDI.
 
-`npm run dev`, then open http://localhost:5173 in a browser with Web MIDI
-(Firefox or Chrome) and click Connect. `?demo` opens a built-in patch offline.
+## Running it
+
+Web MIDI only works on a served page, not on a file opened from disk, so the editor
+runs from a small local server. It needs [Node.js](https://nodejs.org).
+
+Double-click the launcher for your system in `start/`:
+
+- macOS: `start-macos.command` (the first time: right-click, Open)
+- Windows: `start-windows.bat`
+- Linux: `start.sh` (or `sh start/start.sh` in a terminal)
+
+It installs what's needed the first time, builds the editor and opens
+http://localhost:5179 in the default browser (Firefox or Chrome); click Connect.
+Close the terminal window to stop it. The same thing from a terminal: `npm start`.
+
+The port is fixed because the browser remembers the MIDI permission per address.
+`?demo` opens a built-in patch offline.
+
+## Developing
+
+`npm run dev` serves the editor with live reload at the same address.
 `/probe.html` is the protocol test page used during development.
+
 
 - `src/sysex/codec.ts`: the SysEx envelope (base64 + CRC-32 checksum)
 - `src/sysex/protocol.ts`: command bytes, chunking, patch metadata
