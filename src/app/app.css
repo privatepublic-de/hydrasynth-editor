@@ -888,15 +888,39 @@ select {
 
 .wavelist-fill {
   display: inline-flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   margin-left: auto;
+  min-width: 0;
   font: 400 13px/1 var(--text);
 }
 
 .wavelist-fill select,
+.wavelist-fill input,
 .wavelist-fill .function-button {
   padding: 3px 8px;
   font-size: 13px;
+}
+
+.wavelist-fill input {
+  flex: 1 1 10em;
+  width: 10em;
+  min-width: 6em;
+  background: var(--recess);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+}
+
+/* Under the controls, so a long spelling never pushes them out of the panel. */
+.wavelist-fill__said {
+  order: 1;
+  flex-basis: 100%;
+  text-align: right;
+  color: var(--print);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .undo-redo {
