@@ -1,12 +1,12 @@
 // The synth's Left display: the wave of an oscillator, the shape of an envelope, an LFO or a
 // filter's response -- and here also a place to edit them by dragging. The dials stay the
 // keyboard-accessible way to set every value these handles change.
-import { useEffect, useRef } from 'react'
-import { formatValue } from '../params/display'
+import { useRef } from 'react'
 import { param, type Patch } from '../params/patch'
 import { F_MAX, F_MIN, cutoffHz, filter1Gain, filter2Gain, responseCurve } from '../ui/filterResponse'
 import { envelopeShape, lfoAt, lfoLevel, type Point } from '../ui/shapes'
-import { scanPosition, shownEntry, waveImage, wavelist } from '../ui/waves'
+import { morphAt, waveImage } from '../ui/waves'
+import { Stepper } from './controls/Stepper'
 import { useEditor, useGesture } from './store'
 
 const W = 360
@@ -133,70 +133,6 @@ function EnvelopeGraph({ patch, env }: { patch: Patch; env: number }) {
   )
 }
 
-/**
- * Steps a choice-like param by dragging sideways (a step per 12 px), the wheel, or the arrow
- * keys while focused -- for picking waves by looking at them.
- */
-function Stepper({ paramKey, showName, children }: { paramKey: string; showName?: boolean; children: React.ReactNode }) {
-  const def = param(paramKey)
-  const value = useEditor((s) => s.sync?.patch?.get(paramKey) ?? def.min)
-  const set = useEditor((s) => s.set)
-  const drag = useRef<{ x: number; start: number } | null>(null)
-  const el = useRef<HTMLDivElement>(null)
-  const { beginGesture, endGesture } = useGesture()
-  const go = (v: number) => set(paramKey, Math.max(def.min, Math.min(def.max, v)))
-  // React's wheel handler is passive: it can't stop the page scrolling along. A native one can.
-  const latest = useRef(go)
-  latest.current = go
-  const valueRef = useRef(value)
-  valueRef.current = value
-  useEffect(() => {
-    const node = el.current
-    if (!node) return
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      latest.current(valueRef.current + (e.deltaY > 0 || e.deltaX > 0 ? 1 : -1))
-    }
-    node.addEventListener('wheel', onWheel, { passive: false })
-    return () => node.removeEventListener('wheel', onWheel)
-  }, [])
-  return (
-    <div
-      ref={el}
-      className="screen__stepper"
-      role="slider"
-      tabIndex={0}
-      aria-label={`${def.labels[0] ?? paramKey}: drag sideways, scroll or use the arrow keys`}
-      aria-valuemin={def.min}
-      aria-valuemax={def.max}
-      aria-valuenow={value}
-      aria-valuetext={formatValue(def, value)}
-      onPointerDown={(e) => {
-        e.currentTarget.setPointerCapture(e.pointerId)
-        beginGesture()
-        drag.current = { x: e.clientX, start: value }
-      }}
-      onPointerMove={(e) => drag.current && go(drag.current.start + Math.round((e.clientX - drag.current.x) / 12))}
-      onPointerUp={() => {
-        drag.current = null
-        endGesture()
-      }}
-      onPointerCancel={() => {
-        drag.current = null
-        endGesture()
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'ArrowRight' || e.key === 'ArrowUp') go(value + 1)
-        else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') go(value - 1)
-        else return
-        e.preventDefault()
-      }}
-    >
-      {children}
-      {showName && <span className="screen__stepper-name">{formatValue(def, value)}</span>}
-    </div>
-  )
-}
 
 function LfoGraph({ patch, lfo }: { patch: Patch; lfo: number }) {
   const level = lfoLevel(patch, lfo)
@@ -214,62 +150,8 @@ function LfoGraph({ patch, lfo }: { patch: Patch; lfo: number }) {
   )
 }
 
-/** Click or drag along it to move the WaveScan position over the wavelist. */
-function ScanTrack({ osc, length }: { osc: number; length: number }) {
-  const key = `osc${osc}wavscan`
-  const value = useEditor((s) => s.sync?.patch?.get(key) ?? 0)
-  const set = useEditor((s) => s.set)
-  const dragging = useRef(false)
-  const { beginGesture, endGesture } = useGesture()
-  // Entry i sits at the centre of the i-th of `length` cells; position i is WaveScan i/7.
-  const fromX = (e: React.PointerEvent<HTMLDivElement>) => {
-    const r = e.currentTarget.getBoundingClientRect()
-    const i = ((e.clientX - r.left) / r.width) * length - 0.5
-    set(key, Math.round((Math.max(0, Math.min(length - 1, i)) / 7) * 1024))
-  }
-  const at = Math.min((value / 1024) * 7, length - 1)
-  return (
-    <div
-      className="screen__track"
-      role="slider"
-      tabIndex={0}
-      aria-label="WaveScan position"
-      aria-valuemin={0}
-      aria-valuemax={1024}
-      aria-valuenow={value}
-      aria-valuetext={formatValue(param(key), value)}
-      onPointerDown={(e) => {
-        e.currentTarget.setPointerCapture(e.pointerId)
-        beginGesture()
-        dragging.current = true
-        fromX(e)
-      }}
-      onPointerMove={(e) => dragging.current && fromX(e)}
-      onPointerUp={() => {
-        dragging.current = false
-        endGesture()
-      }}
-      onPointerCancel={() => {
-        dragging.current = false
-        endGesture()
-      }}
-      onKeyDown={(e) => {
-        const step = e.shiftKey ? 8 : 64
-        if (e.key === 'ArrowRight') set(key, value + step)
-        else if (e.key === 'ArrowLeft') set(key, value - step)
-        else return
-        e.preventDefault()
-      }}
-    >
-      <div className="screen__marker" style={{ left: `${((at + 0.5) / length) * 100}%` }} />
-    </div>
-  )
-}
-
 function OscWave({ patch, osc }: { patch: Patch; osc: number }) {
   const p = `osc${osc}`
-  const picked = useEditor((s) => s.waveView[p])
-  const setWaveView = useEditor((s) => s.setWaveView)
   const scanning = osc !== 3 && patch.get(`${p}mode`) === 1
   if (!scanning) {
     return (
@@ -278,43 +160,24 @@ function OscWave({ patch, osc }: { patch: Patch; osc: number }) {
       </Stepper>
     )
   }
-  const list = wavelist(patch, osc)
-  const shown = shownEntry(patch, osc, picked)
-  const toggle = (slot: number) => setWaveView(p, picked === slot ? undefined : slot)
-  const big =
-    shown && shown.wave !== 'silence' ? (
-      <img className="screen__wave" src={waveImage(shown.wave)} alt="" draggable={false} />
+  return <Morph patch={patch} osc={osc} />
+}
+
+/** WaveScan: what the position plays, the two waves around it crossfaded by how far it is between them. */
+function Morph({ patch, osc }: { patch: Patch; osc: number }) {
+  const m = morphAt(patch, osc)
+  const layer = (wave: number | 'silence' | undefined, opacity: number) =>
+    wave === undefined || opacity <= 0 ? null : wave === 'silence' ? (
+      <div className="screen__morph-layer screen__silence" style={{ opacity }}>
+        Silence
+      </div>
     ) : (
-      <div className="screen__wave screen__silence screen__silence--large">Silence</div>
+      <img className="screen__morph-layer" src={waveImage(wave)} alt="" draggable={false} style={{ opacity }} />
     )
   return (
-    <div className="screen__scan">
-      {shown ? <Stepper paramKey={`${p}wavscanwave${shown.slot}`}>{big}</Stepper> : big}
-      <p className="screen__caption">
-        {shown ? `Wave ${shown.slot}` : ''}
-        {picked !== undefined && shown?.slot === picked ? (
-          <button type="button" className="screen__follow" onClick={() => setWaveView(p, undefined)}>
-            Follow WaveScan
-          </button>
-        ) : (
-          <span> at the WaveScan position</span>
-        )}
-      </p>
-      <div className="screen__strip">
-        {list.map((w) => (
-          <button
-            key={w.slot}
-            type="button"
-            className={`screen__thumb${shown?.slot === w.slot ? ' is-shown' : ''}`}
-            aria-label={`Show wave ${w.slot}`}
-            aria-pressed={shown?.slot === w.slot}
-            onClick={() => toggle(w.slot)}
-          >
-            {w.wave === 'silence' ? <span className="screen__silence">Silence</span> : <img src={waveImage(w.wave)} alt="" draggable={false} />}
-          </button>
-        ))}
-      </div>
-      <ScanTrack osc={osc} length={list.length} />
+    <div className="screen__morph" role="img" aria-label={m ? `WaveScan between wave ${m.from.slot}${m.to ? ` and ${m.to.slot}` : ''}` : 'WaveScan'}>
+      {layer(m?.from.wave, 1 - (m?.towards ?? 0))}
+      {layer(m?.to?.wave, m?.towards ?? 0)}
     </div>
   )
 }

@@ -10,7 +10,6 @@ const stored = (slot: number, wave: number) => (slot === 1 ? wave : wave + 2)
 export function WavelistFill({ osc }: { osc: number }) {
   const set = useEditor((s) => s.set)
   const grouped = useEditor((s) => s.grouped)
-  const setWaveView = useEditor((s) => s.setWaveView)
   const patch = useEditor((s) => s.sync?.patch)
   const [style, setStyle] = useState<FillStyle>('morph')
   const key = (slot: number) => `osc${osc}wavscanwave${slot}`
@@ -20,7 +19,6 @@ export function WavelistFill({ osc }: { osc: number }) {
     const waves = fillWavelist(style, Math.random, patch.get(key(1)))
     // One undo step for the eight waves.
     grouped(`Fill OSC ${osc} wavelist`, () => SLOTS.forEach((s, i) => set(key(s), stored(s, waves[i]))))
-    setWaveView(`osc${osc}`, undefined)
   }
   const description = FILL_STYLES.find((s) => s.id === style)?.description
 

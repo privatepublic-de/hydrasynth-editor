@@ -619,16 +619,6 @@ select {
   image-rendering: auto;
 }
 
-.screen__scan {
-  position: relative;
-  padding-bottom: 10px;
-}
-
-.screen__strip {
-  display: flex;
-  gap: 3px;
-}
-
 .screen__silence {
   display: grid;
   height: 100%;
@@ -639,88 +629,10 @@ select {
   border: 1px dashed #263039;
 }
 
-.screen__marker {
-  position: absolute;
-  bottom: 0;
-  width: 0;
-  height: 0;
-  transform: translateX(-50%);
-  border: 6px solid transparent;
-  border-bottom-color: var(--access);
-  border-top: 0;
-}
-
-.screen__scan .screen__strip {
-  margin-top: 6px;
-}
-
 .screen__silence--large {
   aspect-ratio: 220 / 104;
   font-size: 15px;
   opacity: 1;
-}
-
-/* Wavelist: each slot is its wave picture (a button: show it large) over its selector. */
-.wave-slot {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.wave-slot .choice select {
-  margin-top: 0;
-}
-
-.wave-thumb {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 100%;
-  aspect-ratio: 220 / 104;
-  padding: 0;
-  background: #000;
-  border: 1px solid #1f262b;
-  border-radius: 3px;
-  cursor: pointer;
-  overflow: hidden;
-  font: 500 13px/1 var(--label);
-  color: var(--oled-dim);
-}
-
-.wave-thumb img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  opacity: 0.75;
-}
-
-.wave-thumb:hover img,
-.wave-thumb.is-shown img {
-  opacity: 1;
-}
-
-.wave-thumb.is-shown {
-  border-color: var(--access);
-}
-
-.wave-thumb--off {
-  border-style: dashed;
-  cursor: default;
-}
-
-button.wave-thumb--off {
-  cursor: pointer;
-}
-
-.wave-thumb__slot {
-  position: absolute;
-  top: 3px;
-  right: 4px;
-  font: 600 12px/1 var(--label);
-  color: var(--oled-text);
-  background: rgba(0, 0, 0, 0.7);
-  padding: 1px 4px;
-  border-radius: 2px;
 }
 
 .param-table-halves {
@@ -755,52 +667,6 @@ button.wave-thumb--off {
   font: 500 14px/1 var(--label);
   color: var(--oled-dim);
   font-variant-numeric: tabular-nums;
-}
-
-.screen__caption {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  margin: 4px 0 6px;
-  font: 500 13px/1.2 var(--label);
-  color: var(--oled-text);
-}
-
-.screen__caption span {
-  color: var(--oled-dim);
-}
-
-.screen__follow {
-  margin-left: auto;
-  background: none;
-  border: 1px solid #263039;
-  border-radius: 3px;
-  padding: 1px 6px;
-  color: var(--oled-dim);
-  font: inherit;
-  cursor: pointer;
-}
-
-.screen__thumb {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 0;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  cursor: pointer;
-  opacity: 0.55;
-}
-
-.screen__thumb img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.screen__thumb.is-shown {
-  opacity: 1;
-  border-color: var(--access);
 }
 
 .pads__octave .function-button {
@@ -854,19 +720,6 @@ button.wave-thumb--off {
   padding: 2px 6px;
   border-radius: 2px;
   pointer-events: none;
-}
-
-.screen__track {
-  position: relative;
-  height: 14px;
-  margin-top: 2px;
-  cursor: ew-resize;
-  touch-action: none;
-  border-bottom: 1px solid #1f262b;
-}
-
-.screen__track .screen__marker {
-  bottom: 0;
 }
 
 /* --- modulation: badges on modulated controls, the param menu ----------------------- */
@@ -1021,4 +874,185 @@ button.wave-thumb--off {
 .undo-redo {
   display: inline-flex;
   gap: 4px;
+}
+
+/* --- WaveScan: the morph picture, the wavelist cells, the position slider ------------------ */
+.screen__morph {
+  position: relative;
+  aspect-ratio: 220 / 104;
+}
+
+.screen__morph-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.wavelist__cells {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 8px;
+}
+
+.wave-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wave-cell .choice select {
+  margin-top: 0;
+}
+
+.wave-cell__picture {
+  position: relative;
+  aspect-ratio: 220 / 104;
+  border: 1px solid #1f262b;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #000;
+}
+
+.wave-cell.is-sounding .wave-cell__picture {
+  border-color: #5a4630;
+}
+
+.wave-cell__stepper,
+.wave-cell__stepper img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.wave-cell__silence {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font: 500 13px/1 var(--label);
+  color: var(--oled-dim);
+}
+
+.wave-cell__slot {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  font: 600 12px/1 var(--label);
+  color: var(--oled-text);
+  background: rgba(0, 0, 0, 0.7);
+  padding: 1px 4px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.wave-cell__remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--oled-dim);
+  font: 600 14px/18px var(--text);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.wave-cell__picture:hover .wave-cell__remove,
+.wave-cell__remove:focus-visible {
+  opacity: 1;
+}
+
+.wave-cell__remove:hover {
+  color: var(--oled-text);
+}
+
+/* The current position's share of this wave, along the picture's bottom edge. */
+.wave-cell__share {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  background: var(--access);
+  pointer-events: none;
+}
+
+.wave-cell--off .wave-cell__add {
+  position: relative;
+  aspect-ratio: 220 / 104;
+  border: 1px dashed #263039;
+  border-radius: 3px;
+  background: none;
+  color: var(--oled-dim);
+  font: 400 22px/1 var(--text);
+  cursor: pointer;
+}
+
+.wave-cell--off .wave-cell__add:hover {
+  color: var(--oled-text);
+  border-color: var(--oled-dim);
+}
+
+.scan-slider {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 4ch;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.scan-slider__label,
+.scan-slider__value {
+  font: 500 14px/1 var(--label);
+  color: var(--oled-dim);
+}
+
+.scan-slider__value {
+  color: var(--oled-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-slider__track {
+  position: relative;
+  height: 28px;
+  cursor: ew-resize;
+  touch-action: none;
+  background: linear-gradient(#263039, #263039) center / 100% 2px no-repeat;
+  border-radius: 3px;
+}
+
+.scan-slider__beyond {
+  position: absolute;
+  top: 12px;
+  right: 0;
+  height: 4px;
+  background: repeating-linear-gradient(90deg, #1f262b 0 4px, transparent 4px 8px);
+}
+
+.scan-slider__tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font: 600 11px/1 var(--label);
+  color: var(--oled-dim);
+  padding-bottom: 14px;
+  background: linear-gradient(#3a4651, #3a4651) center bottom / 1px 10px no-repeat;
+}
+
+.scan-slider__thumb {
+  position: absolute;
+  top: 7px;
+  width: 14px;
+  height: 14px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: var(--access);
+  pointer-events: none;
+}
+
+.wave-cell--off {
+  align-content: start;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Patch } from '../src/params/patch'
-import { scanPosition, shownEntry, waveOf, wavelist } from '../src/ui/waves'
+import { entryPositions, morphAt, scanPosition, slotShares, waveOf, wavelist } from '../src/ui/waves'
 import { fixtureBytes } from './fakeSynth'
 
 describe('wavelist', () => {
@@ -30,15 +30,22 @@ describe('wavelist', () => {
     expect(scanPosition(p, 1, list.length)).toBe(2)
   })
 
-  it('shows the picked slot while it is in the list, else the one at the scan position', () => {
+  it('splits the sound between the two waves around the scan position, skipping Off slots', () => {
     const p = new Patch(fixtureBytes())
     p.set('osc1wavscanwave1', 3)
-    p.set('osc1wavscanwave2', 40)
-    p.set('osc1wavscanwave3', 0)
-    for (const s of [4, 5, 6, 7, 8]) p.set(`osc1wavscanwave${s}`, 0)
+    p.set('osc1wavscanwave2', 0) // Off: wave 3 sounds second
+    p.set('osc1wavscanwave3', 40)
+    p.set('osc1wavscanwave4', 60)
+    for (const s of [5, 6, 7, 8]) p.set(`osc1wavscanwave${s}`, 0)
     p.set('osc1wavscan', 0)
-    expect(shownEntry(p, 1, undefined)?.slot).toBe(1)
-    expect(shownEntry(p, 1, 2)?.slot).toBe(2)
-    expect(shownEntry(p, 1, 3)?.slot).toBe(1)
+    expect([...slotShares(p, 1)]).toEqual([[1, 1]])
+    p.set('osc1wavscan', Math.round((1.25 / 7) * 1024)) // between the 2nd and 3rd sounding waves
+    const shares = slotShares(p, 1)
+    expect(shares.get(3)).toBeCloseTo(0.75, 1)
+    expect(shares.get(4)).toBeCloseTo(0.25, 1)
+    expect(shares.has(2)).toBe(false)
+    p.set('osc1wavscan', 1024) // past the last wave: it alone
+    expect(morphAt(p, 1)).toMatchObject({ from: { slot: 4 }, towards: 0 })
+    expect(entryPositions(p, 1).map((e) => e.slot)).toEqual([1, 3, 4])
   })
 })

@@ -14,8 +14,6 @@ export function waveOf(key: string, value: number): number | 'silence' | null {
   return null
 }
 
-export const isWaveKey = (key: string) => /^osc\d(type|wavscanwave\d)$/.test(key)
-
 export interface WavelistEntry {
   slot: number
   wave: number | 'silence'
@@ -37,8 +35,30 @@ export function scanPosition(patch: Patch, osc: number, length: number): number 
   return Math.min((patch.get(`osc${osc}wavscan`) / 1024) * 7, Math.max(0, length - 1))
 }
 
-/** The wavelist entry shown large: the picked slot while it's in the list, else the one nearest the scan position. */
-export function shownEntry(patch: Patch, osc: number, picked: number | undefined): WavelistEntry | undefined {
+/**
+ * What the WaveScan position plays: the wavelist entry it is on or past, the next one, and how
+ * far towards the next (0..1). The picture crossfades by `towards`; each entry's share of the
+ * sound is shown on its slot.
+ */
+export function morphAt(patch: Patch, osc: number): { from: WavelistEntry; to?: WavelistEntry; towards: number } | null {
   const list = wavelist(patch, osc)
-  return list.find((w) => w.slot === picked) ?? list[Math.round(scanPosition(patch, osc, list.length))]
+  if (!list.length) return null
+  const at = scanPosition(patch, osc, list.length)
+  const i = Math.floor(at)
+  return { from: list[i], to: list[i + 1], towards: list[i + 1] ? at - i : 0 }
+}
+
+/** Each sounding slot's share (0..1) at the current WaveScan position, by slot number. */
+export function slotShares(patch: Patch, osc: number): Map<number, number> {
+  const m = morphAt(patch, osc)
+  const out = new Map<number, number>()
+  if (!m) return out
+  out.set(m.from.slot, 1 - m.towards)
+  if (m.to && m.towards > 0) out.set(m.to.slot, m.towards)
+  return out
+}
+
+/** WaveScan values (0..1024) where each sounding wave sits: entry i is at position i (1.0 = 0). */
+export function entryPositions(patch: Patch, osc: number): { slot: number; value: number }[] {
+  return wavelist(patch, osc).map((w, i) => ({ slot: w.slot, value: Math.round((i / 7) * 1024) }))
 }

@@ -2,11 +2,10 @@ import { useEffect } from 'react'
 import { param, type Patch } from '../params/patch'
 import { MODULES, type ModuleLayout, type Page, type Slot } from '../ui/layout'
 import { isShown } from '../ui/visibility'
-import { isWaveKey, shownEntry, waveImage, waveOf } from '../ui/waves'
 import { ParamControl } from './controls/ParamControl'
 import { ModuleDisplay } from './ModuleDisplay'
 import { StepEditor } from './StepEditor'
-import { WavelistFill } from './WavelistFill'
+import { WavelistView } from './WavelistView'
 import { useEditor } from './store'
 
 /** The Desktop shows 8 characters of a macro name (A5's "FiltAtckMixer" reads "FiltAtck"). */
@@ -14,8 +13,6 @@ const MACRO_NAME_SHOWN = 8
 
 /** Captions the synth takes from the patch: macro knobs and buttons are named after their macro. */
 function captionFor(key: string, patch: Patch): string | undefined {
-  const w = key.match(/^osc\dwavscanwave(\d)$/)
-  if (w) return `Wave ${w[1]}`
   const m = key.match(/^macro(\d)panel(value|buttonstate)$/)
   if (!m) return undefined
   const name = patch.macroName(+m[1]).slice(0, MACRO_NAME_SHOWN).trim() || `Macro ${m[1]}`
@@ -33,40 +30,6 @@ function MacroName({ macro }: { macro: number }) {
       value={name.slice(0, MACRO_NAME_SHOWN)}
       onChange={(e) => setMacroName(macro, e.target.value)}
     />
-  )
-}
-
-/**
- * A wavelist slot's picture: a button that shows the wave large in the display (again: back
- * to following the WaveScan position). The slot number sits in its corner.
- */
-function WaveThumb({ patch, paramKey }: { patch: Patch; paramKey: string }) {
-  const m = paramKey.match(/^osc(\d)wavscanwave(\d)$/)!
-  const osc = `osc${m[1]}`
-  const slot = +m[2]
-  const picked = useEditor((s) => s.waveView[osc])
-  const setWaveView = useEditor((s) => s.setWaveView)
-  const wave = waveOf(paramKey, patch.get(paramKey))
-  const shown = shownEntry(patch, +m[1], picked)?.slot === slot
-  const badge = <span className="wave-thumb__slot">{slot}</span>
-  if (wave === null) {
-    return (
-      <div className="wave-thumb wave-thumb--off">
-        {badge}Off
-      </div>
-    )
-  }
-  return (
-    <button
-      type="button"
-      className={`wave-thumb${shown ? ' is-shown' : ''}${wave === 'silence' ? ' wave-thumb--off' : ''}`}
-      aria-label={`Show wave ${slot} in the display`}
-      aria-pressed={shown}
-      onClick={() => setWaveView(osc, picked === slot ? undefined : slot)}
-    >
-      {badge}
-      {wave === 'silence' ? 'Silence' : <img src={waveImage(wave)} alt="" />}
-    </button>
   )
 }
 
@@ -92,22 +55,16 @@ function PageView({ title, slots }: { title: string; slots: Slot[] }) {
   if (!patch) return null
   const shown = slots.map((slot) => visibleKey(slot, patch))
   if (shown.every((k) => k === null)) return null
+  // The WaveScan list has its own view: Off gaps, each wave's share, the position.
+  const wavelistOsc = title === 'Wavelist' && shown[0]?.match(/^osc(\d)wavscanwave/)?.[1]
+  if (wavelistOsc) return <WavelistView osc={Number(wavelistOsc)} />
   return (
     <section className="page">
-      <h3 className="page__title">
-        {title}
-        {title === 'Wavelist' && shown[0] && <WavelistFill osc={Number(shown[0].match(/^osc(\d)/)![1])} />}
-      </h3>
+      <h3 className="page__title">{title}</h3>
       <div className="page__slots">
         {shown.map((key, i) =>
           key === null ? (
             <div key={i} className="control control--empty" aria-hidden="true" />
-          ) : isWaveKey(key) && /wavscanwave/.test(key) ? (
-            <div key={i} className="wave-slot">
-              <WaveThumb patch={patch} paramKey={key} />
-              {/* The picture names the wave; the caption is for screen readers only. */}
-              <ParamControl paramKey={key} label="" />
-            </div>
           ) : (
             <ParamControl key={i} paramKey={key} label={captionFor(key, patch)} />
           ),

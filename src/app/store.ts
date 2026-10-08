@@ -25,9 +25,6 @@ interface EditorState {
   /** Patch names per bank (0-7), loaded on demand. */
   bankNames: Record<number, string[]>
   module: string
-  /** Wavelist slot shown large per oscillator ('osc1'), or absent to follow the WaveScan position. */
-  waveView: Record<string, number | undefined>
-  setWaveView(osc: string, slot: number | undefined): void
   /** A param to scroll to and highlight (a mod-matrix or macro row), and what to focus there. */
   reveal: { module: string; rowKey: string; focusKey?: string; nonce: number } | null
   revealModulation(m: Modulation, focusKey?: string): void
@@ -81,7 +78,6 @@ export const useEditor = create<EditorState>((set, get) => ({
   sync: null,
   bankNames: {},
   module: 'osc1',
-  waveView: {},
   reveal: null,
   menu: null,
 
@@ -124,9 +120,6 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ menu: null })
   },
 
-  setWaveView(osc, slot) {
-    set((s) => ({ waveView: { ...s.waveView, [osc]: slot } }))
-  },
 
   startDemo() {
     const bytes = demoDump
