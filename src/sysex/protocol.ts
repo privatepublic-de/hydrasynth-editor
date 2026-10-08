@@ -80,9 +80,19 @@ export function parseBankNames(data: Uint8Array): { bank: number; names: string[
 }
 
 /**
+ * 'ETCD' at 1766-1769 makes the synth read the extended block from 1770 on. Without it
+ * (the Init patch has zeros, banks B/C of a factory dump 'XXXX'), LFO steps 9-64 played as 0
+ * although their bytes were there (user, 2026-10-09). In a full dump of the synth no unmarked
+ * patch but one all-zero slot differs from Init in the extended params or holds steps 9+
+ * other than centre, so marking every send changes nothing they play.
+ */
+export const EXTENDED_MARKER = { offset: 1766, bytes: Uint8Array.from('ETCD', (c) => c.charCodeAt(0)) }
+
+/**
  * Bytes 2390-2399 are five 16-bit -100s in every patch the synth stores; it
  * rewrites them on receive (seen on 2.2.0: an older "Init" in H128 came back
  * changed only there, identical from then on). Edisyn writes them too.
+ * Every patch also goes out with the extended-block marker.
  */
 export function normalizePatch(patch: Uint8Array): Uint8Array {
   const out = new Uint8Array(patch)
@@ -90,6 +100,7 @@ export function normalizePatch(patch: Uint8Array): Uint8Array {
     out[i] = 0x9c
     out[i + 1] = 0xff
   }
+  out.set(EXTENDED_MARKER.bytes, EXTENDED_MARKER.offset)
   return out
 }
 
