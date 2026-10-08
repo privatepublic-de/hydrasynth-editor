@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { WAVE_FEATURES } from '../ui/waveFeatures.generated'
 import { buildSpeechPatch } from '../ui/speechPatch'
+import { PITCHES, waveLevels } from '../ui/waveSpeech'
 import { useEditor } from './store'
 
 const SPEEDS = [
@@ -20,14 +22,22 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
   const loadPatch = useEditor((s) => s.loadPatch)
   const [speed, setSpeed] = useState(1)
   const [input, setInput] = useState(text)
+  const [withWaves, setWithWaves] = useState(true)
+  const [pitch, setPitch] = useState(1)
   useEffect(() => ref.current?.showModal(), [])
   const speech = buildSpeechPatch(input, { speed: SPEEDS[speed].speed })
   const words = input.trim()
 
-  const replace = () => {
+  const replace = async () => {
     ref.current?.close()
     if (!speech) return onDone('Nothing to say', input)
-    void loadPatch(speech.patch, `Speech patch “${words}”`)
+    let patch = speech.patch
+    if (withWaves) {
+      const levels = await waveLevels()
+      if (levels.filter(Boolean).length < WAVE_FEATURES.length) return onDone("The wave data didn't load", input)
+      patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, waves: { levels, f0: PITCHES[pitch].hz } })!.patch
+    }
+    void loadPatch(patch, `Speech patch “${words}”`)
     onDone(
       `${speech.sounds.map((s) => s || '·').join(' ')}: hold a note ${(speech.ms / 1000).toFixed(1)} s` +
         (speech.dropped ? ` (${speech.dropped} sounds left out)` : ''),
@@ -40,7 +50,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
       <h2>Replace “{name}” with a speech patch?</h2>
       <label className="speech-dialog__field">
         Words
-        <input type="text" value={input} maxLength={60} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && speech && replace()} />
+        <input type="text" value={input} maxLength={60} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && speech && void replace()} />
       </label>
       <p>
         A new patch that says {words ? `“${words}”` : 'the words'} on every note replaces the whole patch you’re editing: oscillators, mixer, both filters,
@@ -49,10 +59,21 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
         {dirty && ` Your changes to “${name}” haven’t been written to the synth.`}
       </p>
       <p>
-        A Saw through the Vowel filter and noise through Filter 2, run by five one-shot Step LFOs: vowel, voicing, hiss, hiss colour
-        and pitch. {speech ? `It says ${speech.sounds.map((s) => s || '·').join(' ')} in ${(speech.ms / 1000).toFixed(1)} s; hold the note at least that long.` : 'There are no words to say.'}
+        {withWaves ? 'Waves matched to each sound' : 'A Saw'} through the Vowel filter and noise through Filter 2, run by five one-shot
+        Step LFOs: vowel, voicing, hiss, hiss colour and {withWaves ? 'wave (ENV 3 lowers the pitch)' : 'pitch'}. {speech ? `It says ${speech.sounds.map((s) => s || '·').join(' ')} in ${(speech.ms / 1000).toFixed(1)} s; hold the note at least that long.` : 'There are no words to say.'}
         {speech?.dropped ? ` Too long: the last ${speech.dropped} sounds are left out.` : ''}
       </p>
+      <label className="speech-dialog__field" title="Waves whose harmonics already show each sound's formants: clearer vowels around the chosen note, less so far from it">
+        <input type="checkbox" checked={withWaves} onChange={(e) => setWithWaves(e.target.checked)} />
+        Shape the voice with waves, tuned for
+        <select value={pitch} onChange={(e) => setPitch(Number(e.target.value))} disabled={!withWaves}>
+          {PITCHES.map((p, i) => (
+            <option key={p.label} value={i}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="speech-dialog__field">
         Speed
         <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
@@ -67,7 +88,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
         <button type="button" className="function-button" onClick={() => (ref.current?.close(), onDone('', input))}>
           Cancel
         </button>
-        <button type="button" className="function-button function-button--primary" onClick={replace} disabled={!speech}>
+        <button type="button" className="function-button function-button--primary" onClick={() => void replace()} disabled={!speech}>
           {dirty ? 'Discard changes and replace' : 'Replace with speech patch'}
         </button>
       </div>

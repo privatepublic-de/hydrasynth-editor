@@ -3,7 +3,19 @@
 // note it is tuned for, best show that sound's formants. Sweeping WaveScan through the eight slots
 // then "says" the words. Single-cycle waves only hold steady spectra, so vowels and the voiced
 // sounds between them carry it; hisses get the noisiest bright waves, stops a gap of Silence.
+import { loadWaveCycles } from './waveCycles'
 import { WAVE_FEATURES } from './waveFeatures.generated'
+
+/** Notes speech can be tuned for: formants sit at fixed frequencies, harmonics move with the key. */
+export const PITCHES = [
+  { label: 'C2', hz: 65.41 },
+  { label: 'C3', hz: 130.81 },
+  { label: 'C4', hz: 261.63 },
+]
+
+let levels: Promise<(number[] | null)[]> | null = null
+/** Each wave's harmonicLevels, measured once from the recorded cycles (public/wave-cycles.json). */
+export const waveLevels = () => (levels ??= loadWaveCycles().then((cycles) => cycles.map((c) => (c ? harmonicLevels(c.cycle) : null))))
 
 /** Harmonics measured per wave: up to ~8 kHz even for a note as low as C2. */
 export const HARMONICS = 128
@@ -33,7 +45,7 @@ export function harmonicLevels(cycle: Float32Array): number[] {
 type Kind = 'vowel' | 'glide' | 'nasal' | 'hiss' | 'stop'
 
 /** Formants (Hz) of the vowels and glides, adult male averages (Hillenbrand et al., Peterson & Barney). */
-const FORMANTS: Record<string, [number, number, number]> = {
+export const FORMANTS: Record<string, [number, number, number]> = {
   iy: [300, 2300, 3000],
   ih: [430, 2030, 2680],
   eh: [580, 1800, 2600],
@@ -217,7 +229,7 @@ export function spellSounds(text: string): string[] {
 }
 
 /** Correlation of two level curves; `flat` first takes out each one's overall tilt, leaving its peaks. */
-function similarity(a: number[], b: number[], flat: boolean): number {
+export function similarity(a: number[], b: number[], flat: boolean): number {
   const fit = (v: number[]) => {
     const x = v.map((_, i) => Math.log2(i + 1))
     const n = v.length
@@ -245,23 +257,26 @@ function similarity(a: number[], b: number[], flat: boolean): number {
   return aa && bb ? ab / Math.sqrt(aa * bb) : 0
 }
 
-/** Levels (dB) at the harmonics of `f0` through three resonances at `formants`. */
-function formantLevels(formants: number[], f0: number, count: number): number[] {
+/**
+ * Levels (dB) at the harmonics of `f0` through the resonances at `formants`, plus F4 and F5 at
+ * fixed places: without them the highs come out ~8 dB too weak (an "ee" F2 at -32 dB instead of
+ * the voice's ~-24), and front vowels match dark waves.
+ */
+export function formantLevels(formants: number[], f0: number, count: number): number[] {
+  const all = [...formants, 3500, 4500]
+  const bandwidths = [90, 110, 160, 250, 300]
   const out: number[] = []
   for (let k = 1; k <= count; k++) {
     const hz = k * f0
     let gain = 100 / hz // the voice's -6 dB/octave
-    formants.forEach((F, j) => {
-      const B = [90, 110, 160][j]
-      gain *= (F * F) / Math.hypot(F * F - hz * hz, B * hz)
-    })
+    all.forEach((F, j) => (gain *= (F * F) / Math.hypot(F * F - hz * hz, bandwidths[j] * hz)))
     out.push(20 * Math.log10(gain))
   }
   return out
 }
 
 /** The wave that best plays `sound` at `f0`; `levels` are each wave's harmonicLevels. */
-function waveFor(sound: string, levels: (number[] | null)[], f0: number): number {
+export function waveFor(sound: string, levels: (number[] | null)[], f0: number): number {
   const kind = kindOf(sound)!
   // Vowels and glides by their formants up to 3.5 kHz; nasals and hisses by their overall shape to 8 kHz.
   const top = Math.min(HARMONICS, Math.floor((kind === 'vowel' || kind === 'glide' ? 3500 : 8000) / f0))

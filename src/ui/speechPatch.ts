@@ -7,12 +7,15 @@
 //   LFO 4 -> Filt 2 Cutoff   where the hiss sits: s high, sh lower, p/t/k bursts by place
 //   LFO 5 -> Osc 1 Pitch     intonation: stressed syllables up, the phrase falling
 // ENV 2 (the Amp's) just gates the note; the last step is silent and a one-shot LFO holds it.
+// With `waves`, OSC 1 plays a WaveScan list of waves whose harmonics already show each sound's
+// formants at the note it's tuned for (src/ui/waveSpeech.ts) instead of the Saw; LFO 5 then steps
+// WaveScan, and ENV 3 lets the phrase fall in pitch (stressed syllables no longer rise).
 //
 // Measured on a Hydrasynth Desktop (fw 2.x) with tools/calibrateSpeech.ts; see CALIBRATION.
 import { formatValue } from '../params/display'
 import { initPatchBytes } from '../params/initPatch'
 import { Patch, param } from '../params/patch'
-import { spellSounds } from './waveSpeech'
+import { spellSounds, waveFor } from './waveSpeech'
 
 /** What the synth showed when measured (tools/calibrateSpeech.ts), so the numbers can be checked again. */
 export const CALIBRATION = {
@@ -25,8 +28,12 @@ export const CALIBRATION = {
   /** Filter 2 BP (Morph 64), resonance 64: band centre ~516 Hz at raw 512, an octave per ~115 raw (noise). */
   bandAt512Hz: 516,
   bandOctaveRaw: 115,
-  /** Osc 1 Pitch route at depth 128: step units per semitone (pitch). */
+  /** Osc 1 Pitch route at depth 128: step units per semitone; a full envelope is 64 units, too (pitch, envpitch). */
   perSemitone: 5,
+  /** An envelope's Decay from full to 0 takes about twice the time it shows (envpitch). */
+  decayFactor: 2,
+  /** LFO Smooth glides each step change in about 7.5 ms per unit (smooth). */
+  smoothMsPerUnit: 7.5,
   /** Steps 9-64 only play when the patch carries this marker at byte 1766 (factory patches do, Init doesn't). */
   extendedMarker: { offset: 1766, text: 'ETCD' },
 }
@@ -34,13 +41,18 @@ export const CALIBRATION = {
 const STEPS = 64
 const PER_SEMITONE = CALIBRATION.perSemitone
 
-/** Filter 1 Cutoff (raw) for each vowel and glide: the five anchors, and points between them. */
+/**
+ * Filter 1 Cutoff (raw) for each vowel and glide: the five anchors, and points between them. The
+ * front vowels, uh, r and l where the synth's sweep best matched textbook formants at C2, C3 and
+ * C4 alike (tools/calibrateSpeech.ts positions); the rest, which the filter can't quite make
+ * (er's low F3, uw's F2), placed by ear.
+ */
 const { A, E, I, O, U } = CALIBRATION.vowelAt
 const between = (a: number, b: number, t: number) => Math.round(a + (b - a) * t)
-const VOWEL_POS: Record<string, number> = {
-  aa: A, ah: between(A, E, 0.27), ae: between(A, E, 0.6), eh: E, ih: between(E, I, 0.6), iy: I,
-  er: between(I, O, 0.42), ao: between(I, O, 0.9), ow: between(O, U, 0.09), uh: between(O, U, 0.44), uw: U,
-  w: U, y: I, r: between(I, O, 0.5), l: between(O, U, 0.52),
+export const VOWEL_POS: Record<string, number> = {
+  aa: A, ah: between(A, E, 0.19), ae: between(A, E, 0.5), eh: between(A, E, 0.625), ih: E, iy: between(I, E, 0.375),
+  er: between(I, O, 0.42), ao: between(I, O, 0.9), ow: between(O, U, 0.09), uh: between(I, O, 0.875), uw: U,
+  w: U, y: between(I, E, 0.375), r: between(I, O, 0.875), l: between(I, O, 0.875),
 }
 const DIPHTHONGS: Record<string, [string, string]> = { ey: ['eh', 'iy'], ay: ['aa', 'iy'], aw: ['aa', 'uw'], ow: ['ow', 'uw'], oy: ['ao', 'iy'] }
 const bandRaw = (hz: number) => Math.round(512 + CALIBRATION.bandOctaveRaw * Math.log2(hz / CALIBRATION.bandAt512Hz))
@@ -77,13 +89,15 @@ interface Segment {
   noise: number
   band: number
   pitch: number
+  /** The voiced sound whose wave OSC 1 plays (null: the next one's, like `pos`). */
+  shape: string | null
 }
 
 const VOWEL_MS = 140
 function segmentsOf(text: string): Segment[] {
   const out: Segment[] = []
   const seg = (sound: string, ms: number, s: Partial<Segment> = {}) =>
-    out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, ...s })
+    out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, ...s })
   let stressed = true // the first vowel of each word
   for (const s of spellSounds(text)) {
     if (s === '') {
@@ -92,16 +106,17 @@ function segmentsOf(text: string): Segment[] {
     } else if (s in DIPHTHONGS || s in VOWEL_POS) {
       const glide = ['w', 'y', 'r', 'l'].includes(s)
       if (glide) {
-        seg(s, 65, { pos: VOWEL_POS[s], voice: 100 })
+        seg(s, 65, { pos: VOWEL_POS[s], voice: 100, shape: s })
         continue
       }
       const pitch = stressed ? 1.5 : 0
       const ms = stressed ? VOWEL_MS * 1.25 : VOWEL_MS
-      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.45 : 0.65), { pos: VOWEL_POS[v], voice: 128, pitch }))
-      else seg(s, ms, { pos: VOWEL_POS[s], voice: 128, pitch })
+      // A diphthong is a long vowel, with time on both ends: either is easily lost.
+      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.95 : 0.8), { pos: VOWEL_POS[v], voice: 128, pitch, shape: v }))
+      else seg(s, ms, { pos: VOWEL_POS[s], voice: 128, pitch, shape: s })
       stressed = false
     } else if (s === 'm' || s === 'n' || s === 'ng') {
-      seg(s, 75, { pos: VOWEL_POS.uw, voice: 70 })
+      seg(s, 75, { pos: VOWEL_POS.uw, voice: 70, shape: s })
     } else if (s === 'h') {
       seg(s, 55, { noise: 55, band: bandRaw(1500) })
     } else if (s in HISS) {
@@ -109,20 +124,26 @@ function segmentsOf(text: string): Segment[] {
       seg(s, h.voice ? 85 : 105, { noise: h.noise, band: bandRaw(h.hz), voice: h.voice })
     } else if (s in STOP) {
       const st = STOP[s]
-      seg(s, 55, { voice: st.voiced ? 25 : 0 })
-      seg(s, 20, { noise: 90, band: bandRaw(st.hz), voice: st.voiced ? 50 : 0 })
+      // Voiced stops murmur on through the closure, dark with the mouth shut, and release softly into
+      // the vowel; voiceless ones go quiet, then pop.
+      seg(s, 55, st.voiced ? { voice: 45, pos: VOWEL_POS.uw } : {})
+      seg(s, 20, { noise: st.voiced ? 45 : 85, band: bandRaw(st.hz), voice: st.voiced ? 80 : 0 })
       if (st.then) seg(st.then, 60, { noise: HISS[st.then].noise, band: bandRaw(HISS[st.then].hz), voice: HISS[st.then].voice })
     }
   }
   // Nothing sounds before the first or after the last voiced or hissed segment.
   while (out.length && out[0].sound === '') out.shift()
   while (out.length && out.at(-1)!.sound === '') out.pop()
+  // A voiceless hiss after a vowel starts a little late: the vowel rings on into it.
+  for (let i = 1; i < out.length; i++) if (out[i].noise && !out[i].voice && out[i].sound in HISS && out[i - 1].voice === 128) out[i - 1].ms += 40
   // A phrase-final vowel lasts longer.
   const lastVowel = out.map((s) => s.voice).lastIndexOf(128)
   if (lastVowel >= 0) out[lastVowel].ms *= 1.3
   // Consonants take the formants of the vowel after them (or before, at the end).
   let next = VOWEL_POS.ah
   for (let i = out.length - 1; i >= 0; i--) if (out[i].pos === null) out[i].pos = next; else next = out[i].pos!
+  let shape = [...out].reverse().find((s) => s.shape)?.shape ?? null
+  for (let i = out.length - 1; i >= 0; i--) if (out[i].shape === null) out[i].shape = shape; else shape = out[i].shape
   return out
 }
 
@@ -162,10 +183,46 @@ export interface SpeechPatch {
 export interface SpeechPatchOptions {
   /** 1 normal, above 1 slower. */
   speed?: number
+  /** Shape the voice with waves instead of the Saw: each wave's harmonicLevels, and the note (Hz) to tune them for. */
+  waves?: { levels: (number[] | null)[]; f0: number }
+}
+
+/** Envelope times (raw -> ms) the synth offers, read from its own display table. */
+const DECAYS: [number, number][] = (() => {
+  const def = param('env3decaysyncoff')
+  const out: [number, number][] = []
+  for (let v = def.min; v <= def.max; v++) {
+    const label = formatValue(def, v)
+    const n = parseFloat(label.replace(',', '.'))
+    out.push([v, label.endsWith('ms') ? n : n * 1000])
+  }
+  return out
+})()
+
+/**
+ * The WaveScan list for the voiced sounds, in order of first use, and each sound's slot: a wave
+ * per sound, shared when two sounds pick the same one; past eight waves, a sound takes the slot
+ * of the sound with the nearest vowel position.
+ */
+function waveList(segments: Segment[], levels: (number[] | null)[], f0: number) {
+  const waves: number[] = []
+  const slotOf = new Map<string, number>()
+  for (const s of segments) {
+    if (!s.shape || slotOf.has(s.shape)) continue
+    const w = waveFor(s.shape, levels, f0)
+    if (waves.includes(w)) slotOf.set(s.shape, waves.indexOf(w))
+    else if (waves.length < 8) slotOf.set(s.shape, waves.push(w) - 1)
+    else {
+      const pos = VOWEL_POS[s.shape] ?? VOWEL_POS.uw
+      const near = [...slotOf].sort((a, b) => Math.abs((VOWEL_POS[a[0]] ?? U) - pos) - Math.abs((VOWEL_POS[b[0]] ?? U) - pos))[0]
+      slotOf.set(s.shape, near[1])
+    }
+  }
+  return { waves, slotOf }
 }
 
 /** The Init patch turned into a patch that says `text` on each note; null if there's nothing to say. */
-export function buildSpeechPatch(text: string, { speed = 1 }: SpeechPatchOptions = {}): SpeechPatch | null {
+export function buildSpeechPatch(text: string, { speed = 1, waves }: SpeechPatchOptions = {}): SpeechPatch | null {
   const all = segmentsOf(text)
   // More segments than steps: say less (the end goes).
   const segments = all.slice(0, STEPS - 1)
@@ -208,13 +265,19 @@ export function buildSpeechPatch(text: string, { speed = 1 }: SpeechPatchOptions
 
   // The five curves, one value per segment, then a silent hold.
   const total = t.counts.reduce((a, b) => a + b, 0)
+  const list = waves ? waveList(segments, waves.levels, waves.f0) : null
+  /** Smooth for a glide of `ms` between steps (formants move in ~40 ms, pitch a little slower). */
+  const glide = (ms: number) => Math.round(ms / CALIBRATION.smoothMsPerUnit)
   const curves: { target: number; depth: number; value: (s: Segment, at: number) => number; smooth: number; end: number }[] = [
-    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, smooth: 18, end: 0 }, // Filt 1 Cutoff
-    { target: 73, depth: 1024, value: (s) => s.voice / 2, smooth: 1, end: 0 }, // Osc 1 Vol
+    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, smooth: glide(40), end: 0 }, // Filt 1 Cutoff
+    { target: 73, depth: 1024, value: (s) => s.voice / 2, smooth: glide(22), end: 0 }, // Osc 1 Vol
     { target: 77, depth: 1024, value: (s) => s.noise / 2, smooth: 0, end: 0 }, // Noise Vol
     { target: 96, depth: 768, value: (s) => (s.band - 512) / 8, smooth: 0, end: 0 }, // Filt 2 Cutoff
-    // Osc 1 Pitch: stress, and the phrase falling by 2 semitones.
-    { target: 11, depth: 1024, value: (s, at) => (s.pitch + 1 - (3 * at) / total) * PER_SEMITONE, smooth: 30, end: -2 * PER_SEMITONE },
+    list
+      ? // Osc 1 WaveScan: the sound's slot (slot i of 8 sits at i/7 of the range).
+        { target: 13, depth: 1024, value: (s) => ((list.slotOf.get(s.shape ?? '') ?? 0) * 64) / 7, smooth: glide(40), end: ((list.slotOf.get(segments.at(-1)!.shape ?? '') ?? 0) * 64) / 7 }
+      : // Osc 1 Pitch: stress, and the phrase falling by 2 semitones.
+        { target: 11, depth: 1024, value: (s, at) => (s.pitch + 1 - (3 * at) / total) * PER_SEMITONE, smooth: glide(60), end: -2 * PER_SEMITONE },
   ]
   curves.forEach((c, i) => {
     const lfo = `lfo${i + 1}`
@@ -236,6 +299,27 @@ export function buildSpeechPatch(text: string, { speed = 1 }: SpeechPatchOptions
     p.set(`modmatrix${i + 1}modtarget`, c.target)
     p.set(`modmatrix${i + 1}depth`, c.depth)
   })
+
+  if (list) {
+    // OSC 1 scans the waves (slots 2-8 store Off and Silence ahead of them; unused ones Off).
+    p.set('osc1mode', 1)
+    p.set('osc1wavscan', 0)
+    for (let slot = 1; slot <= 8; slot++) {
+      const w = list.waves[slot - 1]
+      p.set(`osc1wavscanwave${slot}`, w === undefined ? (slot === 1 ? 3 : 0) : slot === 1 ? w : w + 2)
+    }
+    // The phrase falls 2 semitones on ENV 3 instead: full envelope at depth +20 (of 128) is 2 semitones.
+    const fall = 2
+    p.set('env3bpmsync', 0)
+    p.set('env3attacksyncoff', 0)
+    p.set('env3holdsyncoff', 0)
+    p.set('env3sustain', 0)
+    const decayMs = (total * t.stepMs) / CALIBRATION.decayFactor
+    p.set('env3decaysyncoff', DECAYS.reduce((a, b) => (Math.abs(b[1] - decayMs) < Math.abs(a[1] - decayMs) ? b : a))[0])
+    p.set('modmatrix6modsource', 3) // Env 3
+    p.set('modmatrix6modtarget', 11) // Osc 1 Pitch
+    p.set('modmatrix6depth', Math.round(512 + ((fall * PER_SEMITONE * 128) / 64) * 4))
+  }
 
   // A stop's closure and burst are one sound.
   const sounds = segments.map((s) => s.sound).filter((s, i, all) => !(s in STOP && all[i - 1] === s))

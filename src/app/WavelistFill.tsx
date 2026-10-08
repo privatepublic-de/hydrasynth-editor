@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import { loadWaveCycles } from '../ui/waveCycles'
 import { WAVE_FEATURES } from '../ui/waveFeatures.generated'
 import { FILL_STYLES, fillWavelist, type FillStyle } from '../ui/wavePopulate'
-import { harmonicLevels, speakWavelist, SILENCE } from '../ui/waveSpeech'
+import { PITCHES, speakWavelist, SILENCE, waveLevels } from '../ui/waveSpeech'
 import { SpeechPatchDialog } from './SpeechPatchDialog'
 import { useEditor } from './store'
 
@@ -13,16 +12,7 @@ const stored = (slot: number, wave: number) => (slot === 1 ? wave : wave === SIL
 const SPEECH = 'speech'
 const SPEECH_DESCRIPTION =
   'Waves that say a few English words, talk-box style, as WaveScan sweeps from 1 to 8 (an envelope on WaveScan over the note does it). Vowels carry it; tuned for one octave.'
-/** Notes the speech is tuned for: formants sit at fixed frequencies, harmonics move with the key. */
-const PITCHES = [
-  { label: 'C2', hz: 65.41 },
-  { label: 'C3', hz: 130.81 },
-  { label: 'C4', hz: 261.63 },
-]
 
-/** Each wave's harmonic levels, measured once from the recorded cycles. */
-let levels: Promise<(number[] | null)[]> | null = null
-const waveLevels = () => (levels ??= loadWaveCycles().then((cycles) => cycles.map((c) => (c ? harmonicLevels(c.cycle) : null))))
 
 /** Fills an oscillator's eight WaveScan waves in a chosen style; each Fill rolls a new set (one undo step). */
 export function WavelistFill({ osc }: { osc: number }) {

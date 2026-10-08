@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { formatValue } from '../src/params/display'
 import { param } from '../src/params/patch'
-import { buildSpeechPatch, CALIBRATION } from '../src/ui/speechPatch'
+import { buildSpeechPatch, CALIBRATION, VOWEL_POS } from '../src/ui/speechPatch'
+import { harmonicLevels } from '../src/ui/waveSpeech'
 
 const show = (p: ReturnType<typeof buildSpeechPatch>, key: string) => formatValue(param(key), p!.patch.get(key))
 const step = (p: ReturnType<typeof buildSpeechPatch>, lfo: number, n: number) => (p!.patch.get(`lfo${lfo}step${n}`) - 512) / 8
@@ -43,11 +45,11 @@ describe('buildSpeechPatch', () => {
     expect(s.ms).toBeCloseTo(((steps - 1) * 1000) / hz, -1)
   })
 
-  it('opens on the vowel filter where the vowel sits: "ee" on I, "oo" on U', () => {
+  it('opens on the vowel filter where the vowel sits: "ee" near I, "oo" on U', () => {
     const iy = buildSpeechPatch('ee')!
     const uw = buildSpeechPatch('ooh')!
     // Filt 1 Cutoff = 512 + step * 8 (base 512, depth +64).
-    expect(512 + step(iy, 1, 1) * 8).toBe(CALIBRATION.vowelAt.I)
+    expect(512 + step(iy, 1, 1) * 8).toBe(VOWEL_POS.iy)
     expect(512 + step(uw, 1, 1) * 8).toBe(CALIBRATION.vowelAt.U)
     // A hiss is noise without voice.
     const s = buildSpeechPatch('see')!
@@ -61,5 +63,33 @@ describe('buildSpeechPatch', () => {
     const long = buildSpeechPatch('the quick brown fox jumps over the lazy dog and keeps on running far away')!
     expect(long.dropped).toBeGreaterThan(0)
     expect(long.patch.get('lfo1steps')).toBe(64)
+  })
+
+  describe('with waves', () => {
+    const levels = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves.map((w: { cycle: string }) =>
+      harmonicLevels(Float32Array.from(new Int16Array(new Uint8Array(Buffer.from(w.cycle, 'base64')).buffer), (v) => v / 32767)),
+    )
+    const s = buildSpeechPatch('hello world', { waves: { levels, f0: 130.81 } })!
+
+    it('scans a wave per voiced sound on LFO 5, and lets ENV 3 lower the pitch', () => {
+      expect(show(s, 'osc1mode')).toBe('WaveScan')
+      expect(show(s, 'modmatrix5modtarget')).toBe('Osc 1 WaveScan')
+      expect(show(s, 'modmatrix6modsource')).toBe('Env 3')
+      expect(show(s, 'modmatrix6modtarget')).toBe('Osc 1 Pitch')
+      expect(show(s, 'osc1wavscanwave1')).not.toBe('Saw')
+      // Every LFO 5 step lands on a slot: i/7 of the range, i a sounding slot.
+      const slots = [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => n === 1 || s.patch.get(`osc1wavscanwave${n}`) >= 2).length
+      for (let n = 1; n <= s.patch.get('lfo5steps'); n++) {
+        const slot = (step(s, 5, n) * 7) / 64
+        expect(Math.abs(slot - Math.round(slot))).toBeLessThan(0.05)
+        expect(Math.round(slot)).toBeLessThan(slots)
+      }
+    })
+
+    it('leaves the Saw patch as it was without them', () => {
+      const plain = buildSpeechPatch('hello world')!
+      expect(show(plain, 'osc1mode')).toBe('Single')
+      expect(show(plain, 'modmatrix5modtarget')).toBe('Osc 1 Pitch')
+    })
   })
 })

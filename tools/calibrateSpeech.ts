@@ -6,6 +6,12 @@
 //   level            Step LFO on Osc 1 Vol and Noise Vol from 0, against static volumes
 //   noise            noise through Filter 2 alone (BP), Cutoff swept: band centre per value
 //   pitch            Step LFO on Osc 1 Pitch at depth 128: semitones per step unit
+//   envpitch         ENV 3 (decaying from full) on Osc 1 Pitch at depth 32: semitones at full envelope
+//   positions        Saw through the Vowel filter, Cutoff in steps of 32: the best Cutoff per vowel
+//   scan             six waves in the WaveScan list, a Step LFO on Osc 1 WaveScan to slot 0..5: which wave sounds
+//   speak <words> [waves]  the speech patch (src/ui/speechPatch.ts) at C3, saved to local/speech-samples
+//   sources          each vowel at C2/C3/C4 from a Saw or from its matched wave (src/ui/waveSpeech.ts),
+//                    through the Vowel filter or not: how often it reads as the right vowel
 // The patches carry the ETCD marker, without which the synth ignores LFO steps 9-64.
 // Usage: npx vite-node tools/calibrateSpeech.ts <experiment> [args]
 import { spawn } from 'node:child_process'
@@ -15,7 +21,9 @@ import { initPatchBytes } from '../src/params/initPatch'
 import { encodeNrpn, nrpnBytes } from '../src/params/nrpn'
 import { Patch, param } from '../src/params/patch'
 import { HydrasynthSession } from '../src/sysex/session'
-import { CALIBRATION } from '../src/ui/speechPatch'
+import { buildSpeechPatch, CALIBRATION, VOWEL_POS } from '../src/ui/speechPatch'
+import { FORMANTS, formantLevels, harmonicLevels, similarity, waveFor } from '../src/ui/waveSpeech'
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { connectHelper } from './coremidiTransport'
 import { RATE, readWav } from './waveAudio'
 
@@ -140,6 +148,21 @@ function frequency(x: Float64Array, from: number, n = 19200): number {
   return (RATE * (ups.length - 1)) / (ups.at(-1)! - ups[0])
 }
 
+/** Third-octave bands 200 Hz..5 kHz. */
+const BANDS = Array.from({ length: 14 }, (_, i) => 200 * 2 ** (i / 3))
+/** Each band's level against the loudest, as a bar of characters (' ' -36 dB .. '@' 0 dB). */
+function bandBar(x: Float64Array, from: number): string {
+  const spec = spectrum(x, from, 4096)
+  const lv = BANDS.map((f) => {
+    const [a, b] = [Math.round((f * 4096) / RATE / 2 ** (1 / 6)), Math.round(((f * 4096) / RATE) * 2 ** (1 / 6))]
+    let e = 0
+    for (let j = a; j <= b; j++) e += 10 ** (spec[j] / 10)
+    return 10 * Math.log10(e)
+  })
+  const top = Math.max(...lv)
+  return '|' + lv.map((v) => ' .:-=+*#%@'[Math.max(0, Math.min(9, Math.round((v - top + 36) / 4)))]).join('') + '|'
+}
+
 const vowelFilter = (p: Patch, control: number) => {
   p.set('filter1type', 10)
   p.set('filter1keytrack', 512)
@@ -220,8 +243,187 @@ try {
       const semis = 12 * Math.log2(f / base)
       console.log(`step ${String(v).padStart(3)}: ${f.toFixed(2)} Hz, ${semis.toFixed(2)} semitones${v ? `, ${(v / semis).toFixed(2)} units per semitone` : ''}`)
     })
+  } else if (experiment === 'envpitch') {
+    const p = initPatch()
+    p.set('osc1type', 0)
+    p.set('env3bpmsync', 0)
+    p.set('env3attacksyncoff', 0)
+    p.set('env3holdsyncoff', 0)
+    p.set('env3decaysyncoff', Number(arg ?? 704)) // 704: 2.30 s
+    p.set('env3sustain', 0)
+    p.set('modmatrix1modsource', 3) // Env 3
+    p.set('modmatrix1modtarget', 11)
+    p.set('modmatrix1depth', 512 + 32 * 4) // +32
+    const x = await take(p, 48, 3)
+    for (const t of [0.02, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.6]) {
+      const f = frequency(x, Math.round(t * RATE), 2400)
+      console.log(`${t.toFixed(2)} s: ${f.toFixed(2)} Hz, ${(12 * Math.log2(f / 130.81)).toFixed(2)} semitones`)
+    }
+  } else if (experiment === 'positions') {
+    const vowels = ['iy', 'ih', 'eh', 'ae', 'aa', 'ah', 'ao', 'ow', 'uh', 'uw', 'er', 'w', 'y', 'r', 'l']
+    const values = Array.from({ length: 33 }, (_, i) => Math.min(1024, i * 32))
+    const SEG = 0.35
+    for (const [name, note, f0] of [['C2', 36, 65.41], ['C3', 48, 130.81], ['C4', 60, 261.63]] as const) {
+      const count = Math.floor(3500 / f0)
+      const p = initPatch()
+      vowelFilter(p, 512)
+      const x = await take(p, note, values.length * SEG, values.map((v, i) => [i * SEG, 'filter1cutoff', v]))
+      const heard = values.map((_, i) => {
+        const spec = spectrum(x, Math.round((i * SEG + 0.15) * RATE))
+        const h = Array.from({ length: count }, (_, k) => {
+          const b = Math.round(((k + 1) * f0 * 8192) / RATE)
+          return Math.max(spec[b - 1], spec[b], spec[b + 1])
+        })
+        const top = Math.max(...h)
+        return h.map((d) => Math.max(d - top, -40))
+      })
+      const line = vowels.map((v) => {
+        const t = formantLevels(FORMANTS[v], f0, count)
+        const tt = t.map((d) => Math.max(d - Math.max(...t), -40))
+        const scores = heard.map((h) => similarity(tt, h, true))
+        const best = scores.indexOf(Math.max(...scores))
+        return `${v} ${values[best]} (${scores[best].toFixed(2)}, now ${VOWEL_POS[v]})`
+      })
+      console.log(name, line.join(' | '))
+    }
+  } else if (experiment === 'scan') {
+    const levels = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves.map((w: { cycle: string }) =>
+      harmonicLevels(Float32Array.from(new Int16Array(new Uint8Array(Buffer.from(w.cycle, 'base64')).buffer), (v) => v / 32767)),
+    )
+    const list = [3, 0, 4, 98, 150, 57] // Saw, Sine, Square, Vokz 3, Micoten 5, Scorpio 2
+    const p = initPatch()
+    p.set('osc1mode', 1)
+    p.set('osc1wavscan', 0)
+    list.forEach((w, i) => p.set(`osc1wavscanwave${i + 1}`, i ? w + 2 : w))
+    for (let n = list.length + 1; n <= 8; n++) p.set(`osc1wavscanwave${n}`, 0)
+    stepLfo(p, list.map((_, i) => (i * 64) / 7), 13, 1024)
+    const x = await take(p, 36, list.length)
+    list.forEach((_, i) => {
+      const spec = spectrum(x, Math.round((i + 0.3) * RATE))
+      const h = Array.from({ length: 40 }, (_, k) => {
+        const b = Math.round(((k + 1) * C2 * 8192) / RATE)
+        return Math.max(spec[b - 1], spec[b], spec[b + 1])
+      })
+      const top = Math.max(...h)
+      const heard = h.map((d) => Math.max(d - top, -50))
+      const scores = list.map((w) => similarity(heard, levels[w].slice(0, 40).map((d: number) => Math.max(d, -50)), false))
+      const best = scores.indexOf(Math.max(...scores))
+      console.log(`slot ${i}: sounds like slot ${best} (${formatValue(param('osc1type'), list[best])}, ${scores[best].toFixed(2)}; own ${scores[i].toFixed(2)})`)
+    })
+  } else if (experiment === 'smooth') {
+    // A Sine at C5, LFO 1 stepping pitch up 10 semitones at 1 s: how long the step takes per Smooth value.
+    for (const smooth of (arg ?? '0,9,18,36,64').split(',').map(Number)) {
+      const p = initPatch()
+      p.set('osc1type', 0)
+      stepLfo(p, [0, 50, 50], 11, 1024)
+      p.set('lfo1smooth', smooth)
+      const x = await take(p, 72, 2.2)
+      const before = frequency(x, Math.round(0.5 * RATE), 4800)
+      const after = frequency(x, Math.round(1.7 * RATE), 4800)
+      // From 0.9 s on, every 5 ms: the share of the way (in semitones) the pitch has gone.
+      const way: string[] = []
+      let t90 = NaN
+      for (let t = 0.9; t < 1.6; t += 0.005) {
+        const f = frequency(x, Math.round(t * RATE), 480)
+        const share = Math.log2(f / before) / Math.log2(after / before)
+        if (Number.isNaN(t90) && share > 0.9) t90 = t
+        if (Math.round(t * 1000) % 25 === 0) way.push(`${Math.round(share * 100)}`)
+      }
+      // When it starts: first time past 10 %.
+      let t10 = NaN
+      for (let t = 0.9; t < 1.6 && Number.isNaN(t10); t += 0.005) {
+        const f = frequency(x, Math.round(t * RATE), 480)
+        if (Math.log2(f / before) / Math.log2(after / before) > 0.1) t10 = t
+      }
+      console.log(`smooth ${String(smooth).padStart(3)}: 10->90 % in ${Math.round((t90 - t10) * 1000)} ms   (% every 25 ms from 0.9 s: ${way.join(' ')})`)
+    }
+  } else if (experiment === 'bands') {
+    // Saw through the Vowel filter at C3, Cutoff held at each value given (default the I region): third-octave levels.
+    const values = (arg ?? '320,384,448,512,576').split(',').map(Number)
+    const p = initPatch()
+    vowelFilter(p, 512)
+    p.set('filter1resonance', 576)
+    const x = await take(p, 48, values.length * 0.5, values.map((v, i) => [i * 0.5, 'filter1cutoff', v]))
+    values.forEach((v, i) => console.log(`cutoff ${String(v).padStart(4)}: ${bandBar(x, Math.round((i * 0.5 + 0.2) * RATE))}`))
+    console.log(`bands ${BANDS.map((f) => Math.round(f)).join(' ')}`)
+  } else if (experiment === 'speak') {
+    const withWaves = process.argv[4] === 'waves'
+    const levels = withWaves
+      ? JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves.map((w: { cycle: string }) =>
+          harmonicLevels(Float32Array.from(new Int16Array(new Uint8Array(Buffer.from(w.cycle, 'base64')).buffer), (v) => v / 32767)),
+        )
+      : null
+    const s = buildSpeechPatch(arg, levels ? { waves: { levels, f0: 130.81 } } : {})!
+    console.log(`${arg}: ${s.sounds.join(' ')}, ${s.ms} ms${withWaves ? `, waves ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => formatValue(param(`osc1wavscanwave${n}`), s.patch.get(`osc1wavscanwave${n}`))).join(', ')}` : ''}`)
+    const x = await take(s.patch, 48, s.ms / 1000 + 0.4)
+    // What each 20 ms sounds like, against the planned Filter 1 Cutoff of that step.
+    const steps = s.patch.get('lfo1steps')
+    const stepMs = s.ms / (steps - 1)
+    for (let t = 0; t < s.ms + 40; t += 20) {
+      const n = Math.min(steps, Math.floor(t / stepMs) + 1)
+      const plan = (k: number) => (s.patch.get(`lfo${k}step${n}`) - 512) / 8
+      console.log(`${String(t).padStart(4)} ms ${bandBar(x, Math.round((t / 1000) * RATE))} cutoff ${512 + plan(1) * 8} voice ${plan(2) * 2} noise ${plan(3) * 2}`)
+    }
+    mkdirSync('local/speech-samples', { recursive: true })
+    const out = `local/speech-samples/${arg.replace(/\W+/g, '-')}${withWaves ? '-waves' : '-saw'}.wav`
+    copyFileSync(FILE, out)
+    console.log('saved', out)
+  } else if (experiment === 'sources') {
+    const levels = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves.map((w: { cycle: string }) =>
+      harmonicLevels(Float32Array.from(new Int16Array(new Uint8Array(Buffer.from(w.cycle, 'base64')).buffer), (v) => v / 32767)),
+    )
+    const vowels = ['iy', 'ih', 'eh', 'ae', 'aa', 'ah', 'ao', 'ow', 'uh', 'uw', 'er']
+    // TUNED=1: the positions 'positions' found best for these targets (where they agree across notes).
+    const TUNED: Record<string, number> = { iy: 448, ih: 256, eh: 160, ae: 128, aa: 0, ah: 0, ao: 768, ow: 768, uh: 736, uw: 768, er: 96 }
+    const pos = (v: string) => (process.env.TUNED ? TUNED[v] : VOWEL_POS[v])
+    const SEG = 0.5
+    for (const [note, f0] of [[36, 65.41], [48, 130.81], [60, 261.63]] as const) {
+      const count = Math.floor(3500 / f0)
+      const target = (v: string) => formantLevels(FORMANTS[v], f0, count).map((d, _, all) => Math.max(d - Math.max(...all), -40))
+      const conditions = [
+        { label: 'Saw + Vowel filter', wave: () => 3, filter: true },
+        { label: 'wave + Vowel filter', wave: (v: string) => waveFor(v, levels, f0), filter: true },
+        { label: 'wave alone', wave: (v: string) => waveFor(v, levels, f0), filter: false },
+      ]
+      // One take per note: every vowel in every condition, half a second each.
+      const changes: [number, string, number][] = []
+      let at = 0
+      for (const c of conditions)
+        for (const v of vowels) {
+          changes.push([at, 'osc1type', c.wave(v)], [at, 'filter1type', c.filter ? 10 : 0], [at, 'filter1cutoff', c.filter ? pos(v) : 1024])
+          at += SEG
+        }
+      const p = initPatch()
+      vowelFilter(p, 512)
+      const x = await take(p, note, at, changes)
+      let n = 0
+      for (const c of conditions) {
+        const heard: number[][] = []
+        let right = 0
+        const wrong: string[] = []
+        for (const v of vowels) {
+          const spec = spectrum(x, Math.round((n++ * SEG + 0.2) * RATE))
+          const h = Array.from({ length: count }, (_, k) => {
+            const b = Math.round(((k + 1) * f0 * 8192) / RATE)
+            return Math.max(spec[b - 1], spec[b], spec[b + 1])
+          })
+          const top = Math.max(...h)
+          heard.push(h.map((d) => Math.max(d - top, -40)))
+          // Which vowel it is closest to, by the same measure the waves were picked by.
+          const scores = vowels.map((u) => similarity(target(u), heard.at(-1)!, true))
+          const best = vowels[scores.indexOf(Math.max(...scores))]
+          if (best === v) right++
+          else wrong.push(`${v}->${best}`)
+        }
+        // How far apart the vowels are: 1 - mean correlation between every pair.
+        let sum = 0
+        let pairs = 0
+        for (let i = 0; i < heard.length; i++) for (let j = i + 1; j < heard.length; j++, pairs++) sum += similarity(heard[i], heard[j], true)
+        console.log(`${['C2', 'C3', 'C4'][[36, 48, 60].indexOf(note)]} ${c.label.padEnd(20)} right ${right}/${vowels.length}, apart ${(1 - sum / pairs).toFixed(2)}  ${wrong.join(' ')}`)
+      }
+    }
   } else {
-    console.log('Usage: npx vite-node tools/calibrateSpeech.ts vowel [control raw] | step | level | noise | pitch')
+    console.log('Usage: npx vite-node tools/calibrateSpeech.ts vowel [control raw] | step | level | noise | pitch | sources')
   }
   console.log(`(LFO rate ${formatValue(param('lfo1ratesyncoff'), 449)} Hz per step in these runs)`)
 } finally {
