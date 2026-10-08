@@ -9,6 +9,8 @@ import { encodeNrpn } from '../params/nrpn'
 import { PARAM_BY_KEY, Patch, param } from '../params/patch'
 import type { ParamDef } from '../params/types'
 import type { HydrasynthSession } from '../sysex/session'
+import { moduleOf } from '../ui/layout'
+import { History, type Snapshot } from './history'
 import { NrpnQueue } from './nrpnQueue'
 
 export interface Slot {
@@ -35,6 +37,9 @@ export interface SyncState {
   error: string | null
   /** Bumped on every change, the patch's bytes included (they change in place). */
   revision: number
+  /** What Undo / Redo would take back or redo, or null. */
+  undoLabel: string | null
+  redoLabel: string | null
 }
 
 export interface PatchSyncOptions {
@@ -63,11 +68,16 @@ export class PatchSync {
     busy: null,
     error: null,
     revision: 0,
+    undoLabel: null,
+    redoLabel: null,
   }
   private listeners = new Set<(s: SyncState) => void>()
   private fullSendTimer: ReturnType<typeof setTimeout> | null = null
   /** Values of the modes not currently selected (the patch bytes hold only the active one). */
   private inactiveValues = new Map<string, number>()
+  private readonly history = new History()
+  /** The bytes as last opened or written: "dirty" means differing from them (null: always dirty). */
+  private baseline: Uint8Array | null = null
   private readonly queue: NrpnQueue
   private channel: number
 
@@ -101,6 +111,8 @@ export class PatchSync {
       const bytes = await this.options.session.downloadPatch(slot.bank, slot.patch)
       await this.options.session.reloadSlot(this.channel, slot.bank, slot.patch)
       this.inactiveValues.clear()
+      this.history.reset()
+      this.baseline = new Uint8Array(bytes)
       this.update({ patch: new Patch(bytes), origin: slot, dirty: false, playing: { kind: 'slot', slot } })
     })
   }
@@ -113,6 +125,8 @@ export class PatchSync {
     this.cancelFullSend()
     this.queue.clear()
     this.inactiveValues.clear()
+    this.history.reset()
+    this.baseline = dirty ? null : new Uint8Array(patch.bytes)
     this.update({ patch: patch.clone(), origin: null, dirty })
     await this.audition()
   }
@@ -121,11 +135,11 @@ export class PatchSync {
   set(key: string, value: number) {
     const patch = this.requirePatch()
     const def = param(key)
-    const before = patch.get(key)
+    if (patch.get(key) === Math.max(def.min, Math.min(def.max, Math.round(value)))) return
+    this.history.record(() => this.snapshot(), key, labelFor(key))
     const dependents = DEPENDENTS.get(key) ?? []
     const wasActive = new Set(dependents.filter((d) => patch.isActive(d)))
     patch.set(key, value)
-    if (patch.get(key) === before) return
     const changed = [def]
     // A mode switch (BPM sync, mutant mode, FX type) gives its dependents' shared bytes
     // another meaning. The synth keeps each mode's values apart while editing: switching
@@ -147,19 +161,48 @@ export class PatchSync {
       else needsFullSend = true
     }
     if (needsFullSend) this.scheduleFullSend()
-    this.update({ dirty: true })
+    this.changed()
   }
 
   setName(name: string) {
-    this.requirePatch().name = name
+    const patch = this.requirePatch()
+    if (patch.name === name) return
+    this.history.record(() => this.snapshot(), 'name', 'Patch name')
+    patch.name = name
     this.scheduleFullSend()
-    this.update({ dirty: true })
+    this.changed()
   }
 
   setMacroName(macro: number, name: string) {
-    this.requirePatch().setMacroName(macro, name)
+    const patch = this.requirePatch()
+    if (patch.macroName(macro) === name) return
+    this.history.record(() => this.snapshot(), `macro${macro}name`, `Macro ${macro} name`)
+    patch.setMacroName(macro, name)
     this.scheduleFullSend()
-    this.update({ dirty: true })
+    this.changed()
+  }
+
+  /** Everything `body` changes is one undo step called `label` (a wavelist fill). */
+  grouped<T>(label: string, body: () => T): T {
+    return this.history.grouped(label, body)
+  }
+
+  beginGesture() {
+    this.history.beginGesture()
+  }
+
+  endGesture() {
+    this.history.endGesture()
+  }
+
+  undo() {
+    const snap = this.state.patch && this.history.undo(this.snapshot())
+    if (snap) this.restore(snap)
+  }
+
+  redo() {
+    const snap = this.state.patch && this.history.redo(this.snapshot())
+    if (snap) this.restore(snap)
   }
 
   /** Sends the whole patch to the audition slot now and plays it from there. */
@@ -184,6 +227,7 @@ export class PatchSync {
       await this.queue.drained()
       await this.options.session.writePatch(slot.bank, slot.patch, this.requirePatch().bytes)
       await this.options.session.reloadSlot(this.channel, slot.bank, slot.patch)
+      this.baseline = new Uint8Array(this.requirePatch().bytes)
       this.update({ origin: slot, dirty: false, playing: { kind: 'slot', slot }, pendingFullSend: false })
     })
   }
@@ -201,6 +245,38 @@ export class PatchSync {
     this.cancelFullSend()
     this.queue.clear()
     this.listeners.clear()
+  }
+
+  private snapshot(): Snapshot {
+    return { bytes: new Uint8Array(this.requirePatch().bytes), inactive: [...this.inactiveValues] }
+  }
+
+  /** Puts the patch back to a snapshot and sends the synth whatever differs. */
+  private restore(snap: Snapshot) {
+    const patch = this.requirePatch()
+    const before = patch.clone()
+    patch.bytes.set(snap.bytes)
+    this.inactiveValues = new Map(snap.inactive)
+    let needsFullSend = before.name !== patch.name
+    for (let m = 1; m <= 8; m++) needsFullSend ||= before.macroName(m) !== patch.macroName(m)
+    for (const def of PARAM_BY_KEY.values()) {
+      if (!patch.isActive(def)) continue
+      // A param whose mode changed is sent too: the synth keeps each mode's own value.
+      const modeChanged = !!def.when && before.get(def.when.key) !== patch.get(def.when.key)
+      if (before.get(def.key) === patch.get(def.key) && !modeChanged) continue
+      const msg = this.liveNrpn(def) ? encodeNrpn(def, patch.get(def.key)) : null
+      if (msg) this.queue.push(def.key, msg, isLeadKey(def.key))
+      else needsFullSend = true
+    }
+    if (needsFullSend) this.scheduleFullSend()
+    this.changed()
+  }
+
+  /** After an edit, undo or redo: "dirty" is whether the bytes differ from the opened ones. */
+  private changed() {
+    const bytes = this.requirePatch().bytes
+    const dirty = !this.baseline || bytes.some((b, i) => b !== this.baseline![i])
+    this.update({ dirty })
   }
 
   private liveNrpn(def: ParamDef): boolean {
@@ -238,9 +314,22 @@ export class PatchSync {
   }
 
   private update(changes: Partial<SyncState>) {
-    this.state = { ...this.state, ...changes, revision: this.state.revision + 1 }
+    this.state = {
+      ...this.state,
+      ...changes,
+      revision: this.state.revision + 1,
+      undoLabel: this.history.undoLabel,
+      redoLabel: this.history.redoLabel,
+    }
     for (const l of this.listeners) l(this.state)
   }
+}
+
+/** "FILTER 1 Cutoff": the module's panel name and the param's caption. */
+export function labelFor(key: string): string {
+  const def = param(key)
+  const module = moduleOf(key)?.label
+  return [module, def.labels[0] ?? key].filter(Boolean).join(' ')
 }
 
 export function slotName({ bank, patch }: Slot): string {

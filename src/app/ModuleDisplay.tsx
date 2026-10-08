@@ -7,7 +7,7 @@ import { param, type Patch } from '../params/patch'
 import { F_MAX, F_MIN, cutoffHz, filter1Gain, filter2Gain, responseCurve } from '../ui/filterResponse'
 import { envelopeShape, lfoAt, lfoLevel, type Point } from '../ui/shapes'
 import { scanPosition, shownEntry, waveImage, wavelist } from '../ui/waves'
-import { useEditor } from './store'
+import { useEditor, useGesture } from './store'
 
 const W = 360
 const H = 140
@@ -43,6 +43,7 @@ function Handle<T>({
   move: (start: T, d: { dx: number; dy: number; x: number; y: number }) => void
 }) {
   const drag = useRef<{ x: number; y: number; start: T } | null>(null)
+  const { beginGesture, endGesture } = useGesture()
   return (
     <circle
       cx={cx}
@@ -53,6 +54,7 @@ function Handle<T>({
         e.stopPropagation()
         e.currentTarget.setPointerCapture(e.pointerId)
         const p = svgPoint(e.currentTarget.ownerSVGElement!, e)
+        beginGesture()
         drag.current = { ...p, start: begin() }
       }}
       onPointerMove={(e) => {
@@ -60,8 +62,14 @@ function Handle<T>({
         const p = svgPoint(e.currentTarget.ownerSVGElement!, e)
         move(drag.current.start, { dx: p.x - drag.current.x, dy: p.y - drag.current.y, ...p })
       }}
-      onPointerUp={() => (drag.current = null)}
-      onPointerCancel={() => (drag.current = null)}
+      onPointerUp={() => {
+        drag.current = null
+        endGesture()
+      }}
+      onPointerCancel={() => {
+        drag.current = null
+        endGesture()
+      }}
     >
       <title>{title}</title>
     </circle>
@@ -135,6 +143,7 @@ function Stepper({ paramKey, showName, children }: { paramKey: string; showName?
   const set = useEditor((s) => s.set)
   const drag = useRef<{ x: number; start: number } | null>(null)
   const el = useRef<HTMLDivElement>(null)
+  const { beginGesture, endGesture } = useGesture()
   const go = (v: number) => set(paramKey, Math.max(def.min, Math.min(def.max, v)))
   // React's wheel handler is passive: it can't stop the page scrolling along. A native one can.
   const latest = useRef(go)
@@ -164,11 +173,18 @@ function Stepper({ paramKey, showName, children }: { paramKey: string; showName?
       aria-valuetext={formatValue(def, value)}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId)
+        beginGesture()
         drag.current = { x: e.clientX, start: value }
       }}
       onPointerMove={(e) => drag.current && go(drag.current.start + Math.round((e.clientX - drag.current.x) / 12))}
-      onPointerUp={() => (drag.current = null)}
-      onPointerCancel={() => (drag.current = null)}
+      onPointerUp={() => {
+        drag.current = null
+        endGesture()
+      }}
+      onPointerCancel={() => {
+        drag.current = null
+        endGesture()
+      }}
       onKeyDown={(e) => {
         if (e.key === 'ArrowRight' || e.key === 'ArrowUp') go(value + 1)
         else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') go(value - 1)
@@ -204,6 +220,7 @@ function ScanTrack({ osc, length }: { osc: number; length: number }) {
   const value = useEditor((s) => s.sync?.patch?.get(key) ?? 0)
   const set = useEditor((s) => s.set)
   const dragging = useRef(false)
+  const { beginGesture, endGesture } = useGesture()
   // Entry i sits at the centre of the i-th of `length` cells; position i is WaveScan i/7.
   const fromX = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
@@ -223,12 +240,19 @@ function ScanTrack({ osc, length }: { osc: number; length: number }) {
       aria-valuetext={formatValue(param(key), value)}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId)
+        beginGesture()
         dragging.current = true
         fromX(e)
       }}
       onPointerMove={(e) => dragging.current && fromX(e)}
-      onPointerUp={() => (dragging.current = false)}
-      onPointerCancel={() => (dragging.current = false)}
+      onPointerUp={() => {
+        dragging.current = false
+        endGesture()
+      }}
+      onPointerCancel={() => {
+        dragging.current = false
+        endGesture()
+      }}
       onKeyDown={(e) => {
         const step = e.shiftKey ? 8 : 64
         if (e.key === 'ArrowRight') set(key, value + step)

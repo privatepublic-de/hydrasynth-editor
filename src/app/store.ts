@@ -8,7 +8,8 @@ import { parseChunk } from '../sysex/protocol'
 import { HydrasynthSession } from '../sysex/session'
 import { destinationOf, freeMacroSlot, freeRoute, type Modulation } from '../ui/modDestinations'
 import demoDump from '../../test/fixtures/sawexpressive.syx.hex?raw'
-import { PatchSync, type Slot, type SyncState } from '../sync/patchSync'
+import { History } from '../sync/history'
+import { PatchSync, labelFor, type Slot, type SyncState } from '../sync/patchSync'
 
 export type Connection =
   | { status: 'disconnected' }
@@ -49,6 +50,13 @@ interface EditorState {
   set(key: string, value: number): void
   setName(name: string): void
   setMacroName(macro: number, name: string): void
+  undo(): void
+  redo(): void
+  /** Everything `body` changes becomes one undo step called `label`. */
+  grouped(label: string, body: () => void): void
+  /** A pointer drag from press to release: one undo step, whatever it changes. */
+  beginGesture(): void
+  endGesture(): void
   write(slot: Slot): Promise<void>
   selectModule(id: string): void
   note(note: number, on: boolean, velocity?: number): void
@@ -128,7 +136,18 @@ export const useEditor = create<EditorState>((set, get) => ({
     const patch = new Patch(Uint8Array.from(bytes))
     set({
       connection: { status: 'demo' },
-      sync: { patch, origin: { bank: 0, patch: 0 }, dirty: false, playing: { kind: 'unknown' }, pendingFullSend: false, busy: null, error: null, revision: 0 },
+      sync: {
+        patch,
+        origin: { bank: 0, patch: 0 },
+        dirty: false,
+        playing: { kind: 'unknown' },
+        pendingFullSend: false,
+        busy: null,
+        error: null,
+        revision: 0,
+        undoLabel: null,
+        redoLabel: null,
+      },
     })
   },
 
@@ -178,17 +197,42 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   set(key, value) {
     if (patchSync) patchSync.set(key, value)
-    else demoEdit(set, get, (p) => p.set(key, value))
+    else demoEdit(set, get, (p) => p.set(key, value), key, labelFor(key))
   },
 
   setName(name) {
     if (patchSync) patchSync.setName(name)
-    else demoEdit(set, get, (p) => (p.name = name))
+    else demoEdit(set, get, (p) => (p.name = name), 'name', 'Patch name')
   },
 
   setMacroName(macro, name) {
     if (patchSync) patchSync.setMacroName(macro, name)
-    else demoEdit(set, get, (p) => p.setMacroName(macro, name))
+    else demoEdit(set, get, (p) => p.setMacroName(macro, name), `macro${macro}name`, `Macro ${macro} name`)
+  },
+
+  undo() {
+    if (patchSync) patchSync.undo()
+    else demoRestore(set, get, 'undo')
+  },
+
+  redo() {
+    if (patchSync) patchSync.redo()
+    else demoRestore(set, get, 'redo')
+  },
+
+  beginGesture() {
+    if (patchSync) patchSync.beginGesture()
+    else demoHistory.beginGesture()
+  },
+
+  endGesture() {
+    if (patchSync) patchSync.endGesture()
+    else demoHistory.endGesture()
+  },
+
+  grouped(label, body) {
+    if (patchSync) patchSync.grouped(label, body)
+    else demoHistory.grouped(label, body)
   },
 
   async write(slot) {
@@ -212,9 +256,36 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 }))
 
-function demoEdit(set: (p: Partial<EditorState>) => void, get: () => EditorState, edit: (p: Patch) => void) {
+/** The demo edits a local patch without a synth, so it keeps its own undo history. */
+const demoHistory = new History()
+const demoSnapshot = (p: Patch) => ({ bytes: new Uint8Array(p.bytes), inactive: [] })
+
+function demoEdit(set: (p: Partial<EditorState>) => void, get: () => EditorState, edit: (p: Patch) => void, key: string, label: string) {
   const sync = get().sync
   if (!sync?.patch) return
-  edit(sync.patch)
-  set({ sync: { ...sync, dirty: true, revision: sync.revision + 1 } })
+  const patch = sync.patch
+  const before = new Uint8Array(patch.bytes)
+  edit(patch)
+  if (patch.bytes.every((b, i) => b === before[i])) return
+  const after = new Uint8Array(patch.bytes)
+  patch.bytes.set(before)
+  demoHistory.record(() => demoSnapshot(patch), key, label)
+  patch.bytes.set(after)
+  set({ sync: { ...sync, dirty: true, revision: sync.revision + 1, undoLabel: demoHistory.undoLabel, redoLabel: demoHistory.redoLabel } })
+}
+
+function demoRestore(set: (p: Partial<EditorState>) => void, get: () => EditorState, which: 'undo' | 'redo') {
+  const sync = get().sync
+  if (!sync?.patch) return
+  const snap = which === 'undo' ? demoHistory.undo(demoSnapshot(sync.patch)) : demoHistory.redo(demoSnapshot(sync.patch))
+  if (!snap) return
+  sync.patch.bytes.set(snap.bytes)
+  set({ sync: { ...sync, revision: sync.revision + 1, undoLabel: demoHistory.undoLabel, redoLabel: demoHistory.redoLabel } })
+}
+
+/** begin/end of a pointer drag, so the whole drag is one undo step. */
+export function useGesture() {
+  const beginGesture = useEditor((s) => s.beginGesture)
+  const endGesture = useEditor((s) => s.endGesture)
+  return { beginGesture, endGesture }
 }

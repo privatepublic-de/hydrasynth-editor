@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { ModuleEditor } from './ModuleEditor'
 import { ParamMenu } from './Modulation'
 import { ModuleSelect } from './ModuleSelect'
@@ -28,7 +29,31 @@ function MasterButtons() {
   )
 }
 
+/**
+ * ⌘Z / Ctrl+Z undoes, ⇧⌘Z / Ctrl+Shift+Z / Ctrl+Y redoes -- except while typing in a text
+ * field, where the browser's own text undo applies.
+ */
+function useUndoKeys() {
+  const undo = useEditor((s) => s.undo)
+  const redo = useEditor((s) => s.redo)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement
+      if (t.isContentEditable || (t.tagName === 'INPUT' && (t as HTMLInputElement).type === 'text') || t.tagName === 'TEXTAREA') return
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+      const k = e.key.toLowerCase()
+      if (k === 'z' && !e.shiftKey) undo()
+      else if ((k === 'z' && e.shiftKey) || (k === 'y' && e.ctrlKey)) redo()
+      else return
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo, redo])
+}
+
 export function App() {
+  useUndoKeys()
   return (
     <div className="app">
       <PatchBar />

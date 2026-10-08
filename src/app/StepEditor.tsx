@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { formatValue } from '../params/display'
 import { param } from '../params/patch'
-import { useEditor } from './store'
+import { useEditor, useGesture } from './store'
 
 const W = 640
 const H = 150
@@ -17,6 +17,7 @@ export function StepEditor({ lfo }: { lfo: number }) {
   const set = useEditor((s) => s.set)
   const [selected, setSelected] = useState(0)
   const drawing = useRef(false)
+  const { beginGesture, endGesture } = useGesture()
   if (!patch) return null
   const p = `lfo${lfo}`
   const count = Math.max(2, Math.min(64, patch.get(`${p}steps`)))
@@ -44,12 +45,19 @@ export function StepEditor({ lfo }: { lfo: number }) {
         aria-label={`LFO ${lfo} steps; Left and Right pick a step, Up and Down change it`}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId)
+          beginGesture()
           drawing.current = true
           fromPointer(e)
         }}
         onPointerMove={(e) => drawing.current && fromPointer(e)}
-        onPointerUp={() => (drawing.current = false)}
-        onPointerCancel={() => (drawing.current = false)}
+        onPointerUp={() => {
+          drawing.current = false
+          endGesture()
+        }}
+        onPointerCancel={() => {
+          drawing.current = false
+          endGesture()
+        }}
         onKeyDown={(e) => {
           // One displayed unit is 8 raw steps (-64..64 over 0..1024); Shift for an eighth.
           const unit = e.shiftKey ? 1 : 8

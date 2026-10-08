@@ -94,6 +94,37 @@ function DiscardDialog({ next, onConfirm, onCancel }: { next: Replacement; onCon
   )
 }
 
+/** Undo / Redo, named after the step they'd take back or redo. */
+function UndoRedo() {
+  const undoLabel = useEditor((s) => s.sync?.undoLabel ?? null)
+  const redoLabel = useEditor((s) => s.sync?.redoLabel ?? null)
+  const undo = useEditor((s) => s.undo)
+  const redo = useEditor((s) => s.redo)
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform)
+  return (
+    <span className="undo-redo">
+      <button
+        type="button"
+        className="function-button"
+        onClick={undo}
+        disabled={!undoLabel}
+        title={undoLabel ? `Undo ${undoLabel} (${mac ? '⌘Z' : 'Ctrl+Z'})` : 'Nothing to undo'}
+      >
+        Undo
+      </button>
+      <button
+        type="button"
+        className="function-button"
+        onClick={redo}
+        disabled={!redoLabel}
+        title={redoLabel ? `Redo ${redoLabel} (${mac ? '⇧⌘Z' : 'Ctrl+Y'})` : 'Nothing to redo'}
+      >
+        Redo
+      </button>
+    </span>
+  )
+}
+
 function Status() {
   const sync = useEditor((s) => s.sync)
   if (!sync) return null
@@ -154,6 +185,7 @@ export function PatchBar() {
         {patch && (
           <input className="patch-bar__name" aria-label="Patch name" maxLength={16} value={patch.name} onChange={(e) => setName(e.target.value)} />
         )}
+        <UndoRedo />
       </header>
     )
   }
@@ -213,6 +245,7 @@ export function PatchBar() {
           <button type="button" className="function-button" onClick={() => setWriting(true)} disabled={!!sync?.busy}>
             Write…
           </button>
+          <UndoRedo />
         </>
       )}
       <Status />

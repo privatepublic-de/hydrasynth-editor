@@ -983,3 +983,8 @@ button.wave-thumb--off {
   padding: 3px 8px;
   font-size: 13px;
 }
+
+.undo-redo {
+  display: inline-flex;
+  gap: 4px;
+}

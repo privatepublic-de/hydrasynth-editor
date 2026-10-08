@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { FILL_STYLES, fillWavelist, type FillStyle } from '../ui/wavePopulate'
 import { useEditor } from './store'
 
@@ -6,28 +6,21 @@ const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8]
 /** Wavelist slots 2-8 store Off and Silence ahead of the waves; slot 1 stores the wave itself. */
 const stored = (slot: number, wave: number) => (slot === 1 ? wave : wave + 2)
 
-/** Fills an oscillator's eight WaveScan waves in a chosen style; each Fill rolls a new set. */
+/** Fills an oscillator's eight WaveScan waves in a chosen style; each Fill rolls a new set (one undo step). */
 export function WavelistFill({ osc }: { osc: number }) {
   const set = useEditor((s) => s.set)
+  const grouped = useEditor((s) => s.grouped)
   const setWaveView = useEditor((s) => s.setWaveView)
   const patch = useEditor((s) => s.sync?.patch)
   const [style, setStyle] = useState<FillStyle>('morph')
-  const before = useRef<number[] | null>(null)
-  const [canUndo, setCanUndo] = useState(false)
   const key = (slot: number) => `osc${osc}wavscanwave${slot}`
   if (!patch) return null
 
   const fill = () => {
-    before.current = SLOTS.map((s) => patch.get(key(s)))
     const waves = fillWavelist(style, Math.random, patch.get(key(1)))
-    SLOTS.forEach((s, i) => set(key(s), stored(s, waves[i])))
+    // One undo step for the eight waves.
+    grouped(`Fill OSC ${osc} wavelist`, () => SLOTS.forEach((s, i) => set(key(s), stored(s, waves[i]))))
     setWaveView(`osc${osc}`, undefined)
-    setCanUndo(true)
-  }
-  const undo = () => {
-    before.current?.forEach((v, i) => set(key(SLOTS[i]), v))
-    before.current = null
-    setCanUndo(false)
   }
   const description = FILL_STYLES.find((s) => s.id === style)?.description
 
@@ -42,9 +35,6 @@ export function WavelistFill({ osc }: { osc: number }) {
       </select>
       <button type="button" className="function-button function-button--primary" title={`Fill all eight waves: ${description}`} onClick={fill}>
         Fill
-      </button>
-      <button type="button" className="function-button" onClick={undo} disabled={!canUndo}>
-        Undo fill
       </button>
     </span>
   )

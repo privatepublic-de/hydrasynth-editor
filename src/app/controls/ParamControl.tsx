@@ -3,7 +3,7 @@ import { choicesOf, formatValue } from '../../params/display'
 import { param } from '../../params/patch'
 import type { ParamDef } from '../../params/types'
 import { ModBadges } from '../Modulation'
-import { useEditor } from '../store'
+import { useEditor, useGesture } from '../store'
 
 /** The value of `key` in the open patch, re-read on every sync revision (bytes change in place). */
 export function useParamValue(key: string): number | null {
@@ -72,6 +72,7 @@ function arcPath(from: number, to: number, r: number) {
 /** An endless-encoder style dial: drag vertically (Shift = fine), wheel, or arrow keys. */
 export function Dial({ def, label, hideLabel, value, onChange }: ControlProps) {
   const drag = useRef<{ y: number; start: number } | null>(null)
+  const { beginGesture, endGesture } = useGesture()
   const range = def.max - def.min
   const inRange = value >= def.min && value <= def.max
   const t = inRange ? (value - def.min) / (range || 1) : 0
@@ -96,6 +97,7 @@ export function Dial({ def, label, hideLabel, value, onChange }: ControlProps) {
         aria-valuetext={formatValue(def, value)}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId)
+          beginGesture()
           drag.current = { y: e.clientY, start: value }
         }}
         onPointerMove={(e) => {
@@ -106,8 +108,14 @@ export function Dial({ def, label, hideLabel, value, onChange }: ControlProps) {
           const next = Math.round(drag.current.start + px * perPx)
           onChange(Math.max(def.min, Math.min(def.max, next)))
         }}
-        onPointerUp={() => (drag.current = null)}
-        onPointerCancel={() => (drag.current = null)}
+        onPointerUp={() => {
+          drag.current = null
+          endGesture()
+        }}
+        onPointerCancel={() => {
+          drag.current = null
+          endGesture()
+        }}
         onWheel={(e) => nudge((e.deltaY < 0 ? 1 : -1) * step(e.shiftKey))}
         onKeyDown={(e) => {
           const s = step(e.shiftKey)
