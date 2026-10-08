@@ -40,6 +40,11 @@ export function curveAt(x: number, curve: number): number {
   return (Math.exp(a * x) - 1) / (Math.exp(a) - 1)
 }
 
+/** Width a 0 ms attack, decay or release keeps, as a share of the graph. */
+const MIN_STAGE = 0.03
+/** Envelopes whose stages add up (in square roots of seconds) to this fill the width; longer ones are compressed. */
+const FULL_SCALE_ROOT = Math.sqrt(8)
+
 export interface Point {
   x: number
   y: number
@@ -53,8 +58,10 @@ export interface EnvelopeShape {
 }
 
 /**
- * Points in 0..1 on both axes. Stage widths follow the square root of their times, so a 30 s
- * release doesn't flatten a 5 ms attack to nothing; the sustain gets a fixed share.
+ * Points in 0..1 on both axes. Stage widths follow the square root of their times on a fixed
+ * scale, so a 30 s release doesn't flatten a 5 ms attack to nothing and a 0 ms stage is a
+ * near-vertical edge; only an envelope too long for the graph is compressed to fit. The
+ * sustain gets a fixed share.
  */
 export function envelopeShape(patch: Patch, env: number, steps = 24): EnvelopeShape {
   const p = `env${env}`
@@ -66,13 +73,16 @@ export function envelopeShape(patch: Patch, env: number, steps = 24): EnvelopeSh
     release: seconds(patch, p, 'release'),
   }
   const sustain = Math.min(1, patch.get(`${p}sustain`) / 1024)
-  const w = (s: number) => Math.sqrt(s) + 0.04
   const SUSTAIN_WIDTH = 0.18
-  const widths = [w(t.delay) - 0.04, w(t.attack), w(t.hold) - 0.04, w(t.decay), 0, w(t.release)]
-  const total = widths.reduce((a, b) => a + b, 0)
-  const scale = (1 - SUSTAIN_WIDTH) / total
+  // Delay, attack, hold, decay, (sustain), release. Attack, decay and release keep a sliver
+  // even at 0 ms so their handles stay apart; delay and hold vanish at 0.
+  const roots = [t.delay, t.attack, t.hold, t.decay, 0, t.release].map(Math.sqrt)
+  const minimum = [0, MIN_STAGE, 0, MIN_STAGE, 0, MIN_STAGE]
+  const room = 1 - SUSTAIN_WIDTH - minimum.reduce((a, b) => a + b, 0)
+  const total = roots.reduce((a, b) => a + b, 0)
+  const scale = Math.min(room / FULL_SCALE_ROOT, total > 0 ? room / total : Infinity)
   const xs = [0]
-  for (const [i, width] of widths.entries()) xs.push(xs[i] + (i === 4 ? SUSTAIN_WIDTH : width * scale))
+  for (const [i, root] of roots.entries()) xs.push(xs[i] + (i === 4 ? SUSTAIN_WIDTH : minimum[i] + root * scale))
 
   const points: Point[] = [{ x: 0, y: 0 }, { x: xs[1], y: 0 }]
   const segment = (x0: number, x1: number, y0: number, y1: number, curve: number) => {

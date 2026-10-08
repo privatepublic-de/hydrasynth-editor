@@ -29,13 +29,36 @@ describe('shapes for the display', () => {
     p.set('env1bpmsync', 0)
     p.set('env1attacksyncoff', 500)
     p.set('env1sustain', 512)
-    const { points, sustain } = envelopeShape(p, 1)
+    const { points, sustain, marks } = envelopeShape(p, 1)
     expect(sustain).toBeCloseTo(0.5)
     expect(points[0]).toEqual({ x: 0, y: 0 })
     expect(points.at(-1)!.y).toBeCloseTo(0)
-    expect(points.at(-1)!.x).toBeCloseTo(1)
+    expect(points.at(-1)!.x).toBeCloseTo(marks[6])
+    expect(marks[6]).toBeLessThanOrEqual(1 + 1e-9)
     expect(Math.max(...points.map((q) => q.y))).toBeCloseTo(1)
     for (let i = 1; i < points.length; i++) expect(points[i].x).toBeGreaterThanOrEqual(points[i - 1].x - 1e-9)
+  })
+
+  it('draws 0 ms stages as near-vertical edges, not stretched ramps (the Init patch)', () => {
+    const p = new Patch(fixtureBytes())
+    p.set('env1bpmsync', 0)
+    for (const k of ['delay', 'attack', 'hold', 'decay', 'release']) p.set(`env1${k}syncoff`, 0)
+    p.set('env1sustain', 1024)
+    const { marks } = envelopeShape(p, 1)
+    expect(marks[2] - marks[1]).toBeLessThan(0.05) // attack
+    expect(marks[6] - marks[5]).toBeLessThan(0.05) // release
+    expect(marks[6]).toBeLessThan(0.35) // the whole envelope is short
+  })
+
+  it('compresses a long envelope to fit, keeping short stages visible', () => {
+    const p = new Patch(fixtureBytes())
+    p.set('env1bpmsync', 0)
+    p.set('env1attacksyncoff', 100)
+    p.set('env1decaysyncoff', 1024)
+    p.set('env1releasesyncoff', 1024)
+    const { marks } = envelopeShape(p, 1)
+    expect(marks[6]).toBeCloseTo(1)
+    expect(marks[2] - marks[1]).toBeGreaterThan(0.03)
   })
 
   it('draws LFO waves with their phase, and Step waves from the steps', () => {
