@@ -6,7 +6,7 @@ import { Patch } from '../params/patch'
 import { decodeMessage } from '../sysex/codec'
 import { parseChunk } from '../sysex/protocol'
 import { HydrasynthSession } from '../sysex/session'
-import { destinationOf, freeMacroSlot, freeRoute, type Modulation } from '../ui/modDestinations'
+import { CENTER_DEPTH, destinationOf, freeMacroSlot, freeRoute, newSlotDepth, type Modulation } from '../ui/modDestinations'
 import demoDump from '../../test/fixtures/sawexpressive.syx.hex?raw'
 import { inSlotOrder, runBackup, type BackupProgress } from '../library/backup'
 import { BackupFileError, backupFileName, decodeBackup, encodeBackup, type StoredPatch } from '../library/backupFile'
@@ -342,8 +342,15 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   set(key, value) {
-    if (patchSync) patchSync.set(key, value)
-    else demoEdit(set, get, (p) => p.set(key, value), key, labelFor(key))
+    const put = (k: string, v: number) => (patchSync ? patchSync.set(k, v) : demoEdit(set, get, (p) => p.set(k, v), k, labelFor(k)))
+    const patch = get().sync?.patch
+    const depth = patch && newSlotDepth(patch, key, value)
+    if (!depth) return put(key, value)
+    // A new route or macro slot starts with no depth, the same undo step.
+    get().grouped(labelFor(key), () => {
+      put(key, value)
+      put(depth, CENTER_DEPTH)
+    })
   },
 
   setName(name) {

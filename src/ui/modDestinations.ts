@@ -76,3 +76,20 @@ export const freeRoute = (patch: Patch) =>
 
 /** The first unused destination slot of a macro. */
 export const freeMacroSlot = (patch: Patch, macro: number) => range(MACRO_SLOTS).find((s) => !patch.get(`macro${macro}target${s}`))
+
+/** Depth's raw value for zero: the middle of 0..1024 (-128..128 on the synth). */
+export const CENTER_DEPTH = 512
+
+/**
+ * When `key` puts something into an empty mod matrix route or macro slot, the depth to centre
+ * with it: an empty slot's depth reads 0, which is full negative, not none.
+ */
+export function newSlotDepth(patch: Patch, key: string, value: number): string | undefined {
+  if (!value) return undefined
+  const route = /^modmatrix(\d+)mod(?:target|source)$/.exec(key)?.[1]
+  const macro = /^macro(\d+)target(\d+)$/.exec(key)
+  const depth = route ? `modmatrix${route}depth` : macro ? `macro${macro[1]}depth${macro[2]}` : undefined
+  if (!depth || patch.get(depth) !== 0) return undefined
+  const empty = route ? !patch.get(`modmatrix${route}modtarget`) && !patch.get(`modmatrix${route}modsource`) : !patch.get(key)
+  return empty ? depth : undefined
+}
