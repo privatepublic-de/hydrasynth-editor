@@ -24,7 +24,7 @@ const BUTTONS: { id: string; label: string; col: number; row: number }[] = [
 ]
 
 const COL = 100
-const ROW = 56
+const ROW = 34
 const W = 9 * COL
 const H = 5 * ROW
 const x = (col: number) => col * COL + COL / 2
@@ -82,13 +82,10 @@ export function ModuleSelect() {
           type="button"
           className="access-button module-select__button"
           aria-pressed={selected === b.id}
-          aria-label={b.label}
           style={{ left: `${(x(b.col) / W) * 100}%`, top: `${(y(b.row) / H) * 100}%` }}
           onClick={() => select(b.id)}
         >
-          {b.label.split(' ').map((part, i) => (
-            <span key={i}>{part}</span>
-          ))}
+          {b.label}
         </button>
       ))}
     </nav>
