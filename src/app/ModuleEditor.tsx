@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { param, type Patch } from '../params/patch'
 import { MODULES, type ModuleLayout, type Page, type Slot } from '../ui/layout'
 import { isShown } from '../ui/visibility'
@@ -180,7 +181,7 @@ function ParamTable({ rows }: { rows: Page[] }) {
         </thead>
         <tbody>
           {rows.map((row, r) => (
-            <tr key={r}>
+            <tr key={r} data-keys={row.slots.flatMap((sl) => (sl === null ? [] : typeof sl === 'string' ? [sl] : sl)).join(' ')}>
               <th scope="row">{row.title.replace(/^Macro \d /, '')}</th>
               {row.slots.map((slot, i) => {
                 const key = visibleKey(slot, patch)
@@ -215,10 +216,27 @@ function blocks(pages: Page[]): Block[] {
   return out
 }
 
+/** Scrolls to the row a modulation badge or menu asked for, highlights it, and focuses into it. */
+function useRevealedRow() {
+  const reveal = useEditor((s) => s.reveal)
+  useEffect(() => {
+    if (!reveal) return
+    const row = document.querySelector<HTMLElement>(`tr[data-keys~="${reveal.rowKey}"]`)
+    if (!row) return
+    row.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    row.classList.remove('is-revealed')
+    void row.offsetWidth // restart the highlight when the same row is shown again
+    row.classList.add('is-revealed')
+    const focus = reveal.focusKey && row.querySelector<HTMLElement>(`[data-param="${reveal.focusKey}"] select, [data-param="${reveal.focusKey}"] [role="slider"]`)
+    ;(focus || row.querySelector<HTMLElement>('select, [role="slider"]'))?.focus({ preventScroll: true })
+  }, [reveal])
+}
+
 export function ModuleEditor() {
   const id = useEditor((s) => s.module)
   const hasPatch = useEditor((s) => !!s.sync?.patch)
   const module: ModuleLayout | undefined = MODULES.find((m) => m.id === id)
+  useRevealedRow()
   if (!hasPatch) {
     return (
       <section className="module-editor module-editor--empty">

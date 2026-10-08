@@ -1,4 +1,5 @@
 import { ModuleEditor } from './ModuleEditor'
+import { ParamMenu } from './Modulation'
 import { ModuleSelect } from './ModuleSelect'
 import { Pads } from './Pads'
 import { PatchBar } from './PatchBar'
@@ -42,6 +43,7 @@ export function App() {
       <footer className="pads-dock">
         <Pads />
       </footer>
+      <ParamMenu />
     </div>
   )
 }

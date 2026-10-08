@@ -5,6 +5,7 @@ import { Patch } from '../params/patch'
 import { decodeMessage } from '../sysex/codec'
 import { parseChunk } from '../sysex/protocol'
 import { HydrasynthSession } from '../sysex/session'
+import { destinationOf, freeMacroSlot, freeRoute, type Modulation } from '../ui/modDestinations'
 import demoDump from '../../test/fixtures/sawexpressive.syx.hex?raw'
 import { PatchSync, type Slot, type SyncState } from '../sync/patchSync'
 
@@ -25,6 +26,17 @@ interface EditorState {
   /** Wavelist slot shown large per oscillator ('osc1'), or absent to follow the WaveScan position. */
   waveView: Record<string, number | undefined>
   setWaveView(osc: string, slot: number | undefined): void
+  /** A param to scroll to and highlight (a mod-matrix or macro row), and what to focus there. */
+  reveal: { module: string; rowKey: string; focusKey?: string; nonce: number } | null
+  revealModulation(m: Modulation, focusKey?: string): void
+  /** Points a free mod-matrix route at `key`'s destination; returns the route, if one was free. */
+  addRoute(key: string): number | undefined
+  /** Adds `key`'s destination to a free slot of a macro; returns the slot, if one was free. */
+  addToMacro(key: string, macro: number): number | undefined
+  /** The param context menu, at a viewport position. */
+  menu: { x: number; y: number; key: string } | null
+  openMenu(key: string, x: number, y: number): void
+  closeMenu(): void
   connect(): Promise<void>
   /** Offline: a bundled patch to look at and edit locally, nothing sent anywhere. */
   startDemo(): void
@@ -59,6 +71,47 @@ export const useEditor = create<EditorState>((set, get) => ({
   bankNames: {},
   module: 'osc1',
   waveView: {},
+  reveal: null,
+  menu: null,
+
+  revealModulation(m, focusKey) {
+    const rowKey = m.kind === 'matrix' ? `modmatrix${m.route}modtarget` : `macro${m.macro}target${m.slot}`
+    set((s) => ({
+      module: m.kind === 'matrix' ? 'modmatrix' : 'macros',
+      reveal: { module: m.kind === 'matrix' ? 'modmatrix' : 'macros', rowKey, focusKey, nonce: (s.reveal?.nonce ?? 0) + 1 },
+    }))
+  },
+
+  addRoute(key) {
+    const patch = get().sync?.patch
+    const dest = destinationOf(key)
+    if (!patch || dest === undefined) return undefined
+    const route = freeRoute(patch)
+    if (route === undefined) return undefined
+    get().set(`modmatrix${route}modtarget`, dest)
+    // Its source is still Off: focus that, the one thing left to choose.
+    get().revealModulation({ kind: 'matrix', route }, `modmatrix${route}modsource`)
+    return route
+  },
+
+  addToMacro(key, macro) {
+    const patch = get().sync?.patch
+    const dest = destinationOf(key)
+    if (!patch || dest === undefined) return undefined
+    const slot = freeMacroSlot(patch, macro)
+    if (slot === undefined) return undefined
+    get().set(`macro${macro}target${slot}`, dest)
+    get().revealModulation({ kind: 'macro', macro, slot }, `macro${macro}depth${slot}`)
+    return slot
+  },
+
+  openMenu(key, x, y) {
+    set({ menu: { key, x, y } })
+  },
+
+  closeMenu() {
+    set({ menu: null })
+  },
 
   setWaveView(osc, slot) {
     set((s) => ({ waveView: { ...s.waveView, [osc]: slot } }))

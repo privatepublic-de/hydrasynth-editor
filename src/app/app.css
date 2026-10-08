@@ -834,3 +834,131 @@ button.wave-thumb--off {
 .screen__track .screen__marker {
   bottom: 0;
 }
+
+/* --- modulation: badges on modulated controls, the param menu ----------------------- */
+.param-shell {
+  display: contents;
+}
+
+/* The label keeps the full width; modulation badges stack at the control's right edge,
+   beside the knob, without moving anything. */
+.control {
+  position: relative;
+}
+
+.control__head {
+  display: block;
+  max-width: 100%;
+  min-height: 16px;
+}
+
+.mod-badges {
+  position: absolute;
+  top: 18px;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 1;
+}
+
+.param-table .mod-badges {
+  top: 50%;
+  transform: translateY(-50%);
+  flex-direction: row;
+}
+
+.mod-badge {
+  font: 600 10px/1 var(--label);
+  letter-spacing: 0.02em;
+  padding: 2px 3px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Mod matrix routes in the access orange, macros in the pads' blue. */
+.mod-badge--matrix {
+  color: var(--access);
+}
+
+.mod-badge--macro {
+  color: #6fa6e0;
+}
+
+.mod-badge:hover {
+  color: #111;
+}
+
+.mod-badge--matrix:hover {
+  background: var(--access);
+}
+
+.mod-badge--macro:hover {
+  background: #6fa6e0;
+}
+
+.param-table tr.is-revealed td,
+.param-table tr.is-revealed th {
+  animation: revealed 1.8s ease-out;
+}
+
+@keyframes revealed {
+  0%,
+  40% {
+    background: rgba(240, 137, 44, 0.22);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.param-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 250px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: grid;
+}
+
+.param-menu__title {
+  margin: 2px 8px 6px;
+  font: 600 14px/1.2 var(--label);
+  color: var(--print);
+}
+
+.param-menu__note {
+  margin: 4px 8px 6px;
+  color: var(--print);
+}
+
+.param-menu button {
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.param-menu button:hover:not(:disabled),
+.param-menu button:focus-visible {
+  background: var(--recess);
+  outline: none;
+}
+
+.param-menu button:disabled {
+  color: #6b7076;
+  cursor: default;
+}
+
+.param-menu hr {
+  border: 0;
+  border-top: 1px solid var(--edge);
+  margin: 4px 2px;
+}

@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { choicesOf, formatValue } from '../../params/display'
 import { param } from '../../params/patch'
 import type { ParamDef } from '../../params/types'
+import { ModBadges } from '../Modulation'
 import { useEditor } from '../store'
 
 /** The value of `key` in the open patch, re-read on every sync revision (bytes change in place). */
@@ -18,9 +19,27 @@ export function ParamControl({ paramKey, label }: { paramKey: string; label?: st
   const hidden = label === ''
   if (value === null) return null
   const props = { def, label: caption, hideLabel: hidden, value, onChange: (v: number) => set(def.key, v) }
-  if (def.widget === 'check') return <Toggle {...props} />
-  if (def.widget === 'choice') return <Choice {...props} />
-  return <Dial {...props} />
+  const control = def.widget === 'check' ? <Toggle {...props} /> : def.widget === 'choice' ? <Choice {...props} /> : <Dial {...props} />
+  return <ParamShell paramKey={def.key}>{control}</ParamShell>
+}
+
+/** Right-click (or the menu key) opens the param's modulation menu. */
+function ParamShell({ paramKey, children }: { paramKey: string; children: React.ReactNode }) {
+  const openMenu = useEditor((s) => s.openMenu)
+  return (
+    <div
+      className="param-shell"
+      data-param={paramKey}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        // From the keyboard the event has no pointer position: open by the focused control.
+        const r = (e.target as HTMLElement).getBoundingClientRect()
+        openMenu(paramKey, e.clientX || r.left, e.clientY || r.bottom)
+      }}
+    >
+      {children}
+    </div>
+  )
 }
 
 interface ControlProps {
@@ -31,8 +50,11 @@ interface ControlProps {
   onChange: (v: number) => void
 }
 
-const Caption = ({ label, hide }: { label: string; hide?: boolean }) => (
-  <span className={hide ? 'visually-hidden' : 'control__label'}>{label}</span>
+const Caption = ({ label, hide, paramKey }: { label: string; hide?: boolean; paramKey: string }) => (
+  <span className="control__head">
+    <span className={hide ? 'visually-hidden' : 'control__label'}>{label}</span>
+    <ModBadges paramKey={paramKey} />
+  </span>
 )
 
 const SWEEP = 270
@@ -61,7 +83,7 @@ export function Dial({ def, label, hideLabel, value, onChange }: ControlProps) {
 
   return (
     <div className="control dial">
-      <Caption label={label} hide={hideLabel} />
+      <Caption label={label} hide={hideLabel} paramKey={def.key} />
       <svg
         viewBox="0 0 48 48"
         className="dial__knob"
@@ -120,7 +142,7 @@ export function Choice({ def, label, hideLabel, value, onChange }: ControlProps)
   const known = choices.some(([v]) => v === value)
   return (
     <label className="control choice">
-      <Caption label={label} hide={hideLabel} />
+      <Caption label={label} hide={hideLabel} paramKey={def.key} />
       <select value={value} onChange={(e) => onChange(Number(e.target.value))}>
         {!known && <option value={value}>{formatValue(def, value)}</option>}
         {choices.map(([v, l]) => (
@@ -133,10 +155,10 @@ export function Choice({ def, label, hideLabel, value, onChange }: ControlProps)
   )
 }
 
-export function Toggle({ label, hideLabel, value, onChange }: ControlProps) {
+export function Toggle({ def, label, hideLabel, value, onChange }: ControlProps) {
   return (
     <div className="control toggle">
-      <Caption label={label} hide={hideLabel} />
+      <Caption label={label} hide={hideLabel} paramKey={def.key} />
       <button
         type="button"
         className="toggle__button"
