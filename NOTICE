@@ -14,3 +14,6 @@ tools/edisyn-extract/ names the exact commit).
 
 test/fixtures/sawexpressive.syx.hex is the "Sawpressive GD" dump from Edisyn's
 Decode.java, converted to hex text.
+
+public/waves/ holds Thierry Rochebois Zic's Hydrasynth wave images, CC BY 4.0, as cut and
+colour-inverted by Sean Luke for Edisyn; see public/waves/README.txt.

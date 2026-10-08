@@ -510,3 +510,103 @@ select {
   padding: 2px 6px;
   font: 600 14px/1.2 var(--text);
 }
+
+/* --- the Left display: wave / envelope / LFO pictures -------------------------- */
+.module-editor__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+
+.screen {
+  width: min(380px, 100%);
+  border: 1px solid #1f262b;
+  border-radius: 4px;
+  padding: 6px;
+  background: #000;
+}
+
+.screen__graph {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.screen__grid {
+  stroke: #1c252c;
+  stroke-width: 1;
+}
+
+.screen__line {
+  fill: none;
+  stroke: var(--oled-text);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.screen__area {
+  fill: rgba(223, 232, 238, 0.08);
+}
+
+.screen__wave {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: auto;
+}
+
+.screen__scan {
+  position: relative;
+  padding-bottom: 10px;
+}
+
+.screen__strip {
+  display: flex;
+  gap: 3px;
+}
+
+.screen__strip img,
+.screen__silence {
+  flex: 1 1 0;
+  min-width: 0;
+  opacity: 0.55;
+}
+
+.screen__strip img {
+  height: auto;
+}
+
+.screen__strip img.is-near {
+  opacity: 1;
+}
+
+.screen__silence {
+  display: grid;
+  place-items: center;
+  font: 500 11px/1 var(--label);
+  color: var(--oled-dim);
+  border: 1px dashed #263039;
+}
+
+.screen__marker {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: var(--access);
+  border-top: 0;
+}
+
+.screen__scan .screen__strip {
+  margin-top: 6px;
+}
+
+.screen__silence--large {
+  aspect-ratio: 220 / 104;
+  font-size: 15px;
+  opacity: 1;
+}

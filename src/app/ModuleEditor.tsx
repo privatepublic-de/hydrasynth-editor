@@ -2,6 +2,7 @@ import { param, type Patch } from '../params/patch'
 import { MODULES, type ModuleLayout, type Page, type Slot } from '../ui/layout'
 import { isShown } from '../ui/visibility'
 import { ParamControl } from './controls/ParamControl'
+import { ModuleDisplay } from './ModuleDisplay'
 import { useEditor } from './store'
 
 /** The Desktop shows 8 characters of a macro name (A5's "FiltAtckMixer" reads "FiltAtck"). */
@@ -133,7 +134,10 @@ export function ModuleEditor() {
   if (!module) return null
   return (
     <section className="module-editor" aria-label={module.label}>
-      <h2 className="module-editor__title">{module.label}</h2>
+      <div className="module-editor__head">
+        <h2 className="module-editor__title">{module.label}</h2>
+        <ModuleDisplay module={module.id} />
+      </div>
       <div className="module-editor__pages">
         {blocks(module.pages).map((b, i) =>
           b.kind === 'page' ? (
