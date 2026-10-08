@@ -1,6 +1,7 @@
 // The synth's Left display: the wave of an oscillator, the shape of an envelope or an LFO.
 import type { Patch } from '../params/patch'
 import { envelopeShape, lfoAt, lfoLevel, type Point } from '../ui/shapes'
+import { scanPosition, shownEntry, waveImage, wavelist } from '../ui/waves'
 import { useEditor } from './store'
 
 const W = 360
@@ -42,42 +43,46 @@ function LfoGraph({ patch, lfo }: { patch: Patch; lfo: number }) {
   )
 }
 
-/** Wave pictures by Thierry Rochebois Zic (CC BY 4.0, see public/waves/README.txt). */
-const waveImage = (wave: number) => `${import.meta.env.BASE_URL}waves/${wave}.png`
-
 function OscWave({ patch, osc }: { patch: Patch; osc: number }) {
   const p = `osc${osc}`
+  const picked = useEditor((s) => s.waveView[p])
+  const setWaveView = useEditor((s) => s.setWaveView)
   const scanning = osc !== 3 && patch.get(`${p}mode`) === 1
-  if (!scanning) {
-    const wave = patch.get(`${p}type`)
-    return <img className="screen__wave" src={waveImage(wave)} alt="" />
-  }
-  // Wavelist: wave 1 is a wave number; waves 2-8 put Off and Silence ahead of the waves.
-  const list = [1, 2, 3, 4, 5, 6, 7, 8]
-    .map((i) => {
-      const v = patch.get(`${p}wavscanwave${i}`)
-      return i === 1 ? { i, wave: v } : v >= 2 ? { i, wave: v - 2 } : v === 1 ? { i, wave: null } : null
-    })
-    .filter((w): w is { i: number; wave: number | null } => w !== null)
-  // WaveScan 0..1024 runs over positions 1.0 .. 8.0; an Off slot drops out of the list.
-  const position = (patch.get(`${p}wavscan`) / 1024) * 7
-  const at = Math.min(position, list.length - 1)
-  const near = list[Math.round(at)]
+  if (!scanning) return <img className="screen__wave" src={waveImage(patch.get(`${p}type`))} alt="" />
+  const list = wavelist(patch, osc)
+  const at = scanPosition(patch, osc, list.length)
+  const shown = shownEntry(patch, osc, picked)
+  const toggle = (slot: number) => setWaveView(p, picked === slot ? undefined : slot)
   return (
     <div className="screen__scan">
-      {near?.wave != null ? (
-        <img className="screen__wave" src={waveImage(near.wave)} alt="" />
+      {shown && shown.wave !== 'silence' ? (
+        <img className="screen__wave" src={waveImage(shown.wave)} alt="" />
       ) : (
         <div className="screen__wave screen__silence screen__silence--large">Silence</div>
       )}
-      <div className="screen__strip">
-        {list.map((w, n) =>
-          w.wave === null ? (
-            <span key={w.i} className="screen__silence">Silence</span>
-          ) : (
-            <img key={w.i} src={waveImage(w.wave)} alt="" className={Math.round(at) === n ? 'is-near' : ''} />
-          ),
+      <p className="screen__caption">
+        {shown ? `Wave ${shown.slot}` : ''}
+        {picked !== undefined && shown?.slot === picked ? (
+          <button type="button" className="screen__follow" onClick={() => setWaveView(p, undefined)}>
+            Follow WaveScan
+          </button>
+        ) : (
+          <span> at the WaveScan position</span>
         )}
+      </p>
+      <div className="screen__strip">
+        {list.map((w) => (
+          <button
+            key={w.slot}
+            type="button"
+            className={`screen__thumb${shown?.slot === w.slot ? ' is-shown' : ''}`}
+            aria-label={`Show wave ${w.slot}`}
+            aria-pressed={shown?.slot === w.slot}
+            onClick={() => toggle(w.slot)}
+          >
+            {w.wave === 'silence' ? <span className="screen__silence">Silence</span> : <img src={waveImage(w.wave)} alt="" />}
+          </button>
+        ))}
       </div>
       <div className="screen__marker" style={{ left: `${((at + 0.5) / list.length) * 100}%` }} aria-hidden="true" />
     </div>

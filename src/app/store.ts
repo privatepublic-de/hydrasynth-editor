@@ -22,6 +22,9 @@ interface EditorState {
   /** Patch names per bank (0-7), loaded on demand. */
   bankNames: Record<number, string[]>
   module: string
+  /** Wavelist slot shown large per oscillator ('osc1'), or absent to follow the WaveScan position. */
+  waveView: Record<string, number | undefined>
+  setWaveView(osc: string, slot: number | undefined): void
   connect(): Promise<void>
   /** Offline: a bundled patch to look at and edit locally, nothing sent anywhere. */
   startDemo(): void
@@ -55,6 +58,11 @@ export const useEditor = create<EditorState>((set, get) => ({
   sync: null,
   bankNames: {},
   module: 'osc1',
+  waveView: {},
+
+  setWaveView(osc, slot) {
+    set((s) => ({ waveView: { ...s.waveView, [osc]: slot } }))
+  },
 
   startDemo() {
     const bytes = demoDump

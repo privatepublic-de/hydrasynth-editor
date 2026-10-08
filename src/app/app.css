@@ -247,9 +247,16 @@ select {
   letter-spacing: 0.04em;
 }
 
+/* Pages are the synth's: knobs 1-4 above 5-8. They flow side by side when there's room. */
 .module-editor__pages {
   display: grid;
-  gap: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(390px, 1fr));
+  gap: 18px 28px;
+  align-items: start;
+}
+
+.page--wide {
+  grid-column: 1 / -1;
 }
 
 .page__title {
@@ -262,7 +269,7 @@ select {
 
 .page__slots {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px 12px;
 }
 
@@ -329,6 +336,8 @@ select {
 
 .choice select {
   width: 100%;
+  font-size: 13px;
+  padding: 4px 2px;
   background: #0b0d0f;
   color: var(--oled-text);
   border-color: #263039;
@@ -442,9 +451,6 @@ select {
   .master-buttons {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
-  .page__slots {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -521,7 +527,8 @@ select {
 }
 
 .screen {
-  width: min(380px, 100%);
+  width: 100%;
+  max-width: 440px;
   border: 1px solid #1f262b;
   border-radius: 4px;
   padding: 6px;
@@ -567,23 +574,10 @@ select {
   gap: 3px;
 }
 
-.screen__strip img,
-.screen__silence {
-  flex: 1 1 0;
-  min-width: 0;
-  opacity: 0.55;
-}
-
-.screen__strip img {
-  height: auto;
-}
-
-.screen__strip img.is-near {
-  opacity: 1;
-}
-
 .screen__silence {
   display: grid;
+  height: 100%;
+  min-height: 20px;
   place-items: center;
   font: 500 11px/1 var(--label);
   color: var(--oled-dim);
@@ -609,4 +603,147 @@ select {
   aspect-ratio: 220 / 104;
   font-size: 15px;
   opacity: 1;
+}
+
+/* Wavelist: each slot is its wave picture (a button: show it large) over its selector. */
+.wave-slot {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wave-slot .choice select {
+  margin-top: 0;
+}
+
+.wave-thumb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 220 / 104;
+  padding: 0;
+  background: #000;
+  border: 1px solid #1f262b;
+  border-radius: 3px;
+  cursor: pointer;
+  overflow: hidden;
+  font: 500 13px/1 var(--label);
+  color: var(--oled-dim);
+}
+
+.wave-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0.75;
+}
+
+.wave-thumb:hover img,
+.wave-thumb.is-shown img {
+  opacity: 1;
+}
+
+.wave-thumb.is-shown {
+  border-color: var(--access);
+}
+
+.wave-thumb--off {
+  border-style: dashed;
+  cursor: default;
+}
+
+button.wave-thumb--off {
+  cursor: pointer;
+}
+
+.wave-thumb__slot {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  font: 600 12px/1 var(--label);
+  color: var(--oled-text);
+  background: rgba(0, 0, 0, 0.7);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.param-table-halves {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  gap: 0 28px;
+  align-items: start;
+}
+
+/* --- LFO step editor ------------------------------------------------------------ */
+.step-editor__bars {
+  display: block;
+  width: 100%;
+  height: 150px;
+  background: #050708;
+  border: 1px solid #1f262b;
+  border-radius: 3px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.step-editor__bar {
+  fill: #5d6b75;
+}
+
+.step-editor__bar.is-selected {
+  fill: var(--oled-text);
+}
+
+.step-editor__readout {
+  margin: 6px 0 0;
+  font: 500 14px/1 var(--label);
+  color: var(--oled-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.screen__caption {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 4px 0 6px;
+  font: 500 13px/1.2 var(--label);
+  color: var(--oled-text);
+}
+
+.screen__caption span {
+  color: var(--oled-dim);
+}
+
+.screen__follow {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #263039;
+  border-radius: 3px;
+  padding: 1px 6px;
+  color: var(--oled-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.screen__thumb {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.screen__thumb img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.screen__thumb.is-shown {
+  opacity: 1;
+  border-color: var(--access);
 }
