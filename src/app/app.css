@@ -772,3 +772,9 @@ button.wave-thumb--off {
 .pads__octave .function-button {
   padding: 3px 10px;
 }
+
+.screen__cutoff {
+  stroke: var(--access);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}

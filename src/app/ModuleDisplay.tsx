@@ -1,6 +1,7 @@
 // The synth's Left display: the wave of an oscillator, the shape of an envelope or an LFO.
 import type { Patch } from '../params/patch'
 import { envelopeShape, lfoAt, lfoLevel, type Point } from '../ui/shapes'
+import { F_MAX, F_MIN, cutoffHz, filter1Gain, filter2Gain, responseCurve } from '../ui/filterResponse'
 import { scanPosition, shownEntry, waveImage, wavelist } from '../ui/waves'
 import { useEditor } from './store'
 
@@ -89,6 +90,30 @@ function OscWave({ patch, osc }: { patch: Patch; osc: number }) {
   )
 }
 
+const DB_TOP = 24
+const DB_BOTTOM = -48
+const dbY = (db: number) => PAD + ((DB_TOP - Math.max(DB_BOTTOM, Math.min(DB_TOP, db))) / (DB_TOP - DB_BOTTOM)) * (H - 2 * PAD)
+const freqX = (hz: number) => PAD + (Math.log(hz / F_MIN) / Math.log(F_MAX / F_MIN)) * (W - 2 * PAD)
+
+function FilterGraph({ patch, filter }: { patch: Patch; filter: 1 | 2 }) {
+  const gain = filter === 1 ? (hz: number) => filter1Gain(patch, hz) : (hz: number) => filter2Gain(patch, hz)
+  const curve = responseCurve(gain)
+  const d = curve.map((p, i) => `${i ? 'L' : 'M'}${(PAD + p.x * (W - 2 * PAD)).toFixed(1)},${dbY(p.db).toFixed(1)}`).join(' ')
+  const vowel = filter === 1 && [10, 16].includes(patch.get('filter1type'))
+  const fc = cutoffHz(patch.get(`filter${filter}cutoff`))
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="screen__graph" role="img" aria-label={`Filter ${filter} response`}>
+      {[100, 1000, 10000].map((hz) => (
+        <line key={hz} x1={freqX(hz)} x2={freqX(hz)} y1={PAD} y2={H - PAD} className="screen__grid" />
+      ))}
+      <line x1={PAD} x2={W - PAD} y1={dbY(0)} y2={dbY(0)} className="screen__grid" />
+      {!vowel && <line x1={freqX(fc)} x2={freqX(fc)} y1={PAD} y2={H - PAD} className="screen__cutoff" />}
+      <path d={`${d} L${W - PAD},${H - PAD} L${PAD},${H - PAD} Z`} className="screen__area" />
+      <path d={d} className="screen__line" />
+    </svg>
+  )
+}
+
 /** Shown above a module's pages when the synth's display would draw something for it. */
 export function ModuleDisplay({ module }: { module: string }) {
   const patch = useEditor((s) => s.sync?.patch)
@@ -99,6 +124,7 @@ export function ModuleDisplay({ module }: { module: string }) {
   if ((m = module.match(/^env(\d)$/))) body = <EnvelopeGraph patch={patch} env={+m[1]} />
   else if ((m = module.match(/^lfo(\d)$/))) body = <LfoGraph patch={patch} lfo={+m[1]} />
   else if ((m = module.match(/^osc(\d)$/))) body = <OscWave patch={patch} osc={+m[1]} />
+  else if (module === 'filter1' || module === 'filter2') body = <FilterGraph patch={patch} filter={module === 'filter1' ? 1 : 2} />
   if (!body) return null
   return <div className="screen">{body}</div>
 }
