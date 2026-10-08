@@ -73,6 +73,12 @@
   the synth keeps its own tempo (85.0) whatever the patch says. The UI should say so next to
   the tempo instead of looking broken.
 
+- **System Setup isn't remotely editable** (2026-10-08). ASM's MIDI spec 1.5.0 lists only
+  Master Volume (CC 7), CV source, aftertouch delay / fade-in / release and "OverFlow" as
+  global NRPN, its System section is empty. Changing System Setup items on the synth emits
+  no NRPN for them, only arp tempo (0x3F 0x38) and all-notes-off (0x3F 0x4E, 0x3F 0x57).
+  The user decided to leave system settings to the panel.
+
 ## Open questions for the device
 
 - Switching FX type or mutant mode: does the synth keep the other type's values apart too
