@@ -21,3 +21,21 @@ export function formatValue(def: ParamDef, value: number): string {
 export function choicesOf(def: ParamDef): [number, string][] {
   return def.choices !== undefined ? CHOICE_TABLES[def.choices] : []
 }
+
+const ZERO_LABEL = /^[-+]?0([.,]0*)?\s*(%|dB)?$/
+const isZeroLabel = (s: string) => ZERO_LABEL.test(s.trim()) || s === 'Linear' || s === '--'
+const centers = new Map<string, number | undefined>()
+
+/**
+ * A bipolar dial's zero (the raw value shown as 0, Linear or a centred pan), or undefined for
+ * a dial that starts at its zero. Most bipolar params are stored 0..1024 with a table, so this
+ * goes by the display, not by `min < 0`.
+ */
+export function centerValue(def: ParamDef): number | undefined {
+  if (centers.has(def.key)) return centers.get(def.key)
+  const zeros: number[] = []
+  for (let v = def.min; v <= def.max; v++) if (isZeroLabel(formatValue(def, v))) zeros.push(v)
+  const center = zeros.length && zeros[0] > def.min && zeros.at(-1)! < def.max ? zeros[zeros.length >> 1] : undefined
+  centers.set(def.key, center)
+  return center
+}

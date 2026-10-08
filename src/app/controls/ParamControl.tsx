@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { choicesOf, formatValue } from '../../params/display'
+import { centerValue, choicesOf, formatValue } from '../../params/display'
 import { param } from '../../params/patch'
 import type { ParamDef } from '../../params/types'
 import { ModBadges } from '../Modulation'
@@ -58,6 +58,8 @@ const Caption = ({ label, hide, paramKey }: { label: string; hide?: boolean; par
 )
 
 const SWEEP = 270
+/** Pixels of drag that a bipolar dial's zero holds on to. */
+const SNAP_PX = 8
 const START = -135
 
 function arcPath(from: number, to: number, r: number) {
@@ -76,8 +78,8 @@ export function Dial({ def, label, hideLabel, value, onChange }: ControlProps) {
   const range = def.max - def.min
   const inRange = value >= def.min && value <= def.max
   const t = inRange ? (value - def.min) / (range || 1) : 0
-  const bipolar = def.min < 0
-  const zeroAt = bipolar ? START + SWEEP * ((0 - def.min) / range) : START
+  const center = centerValue(def)
+  const zeroAt = center !== undefined ? START + SWEEP * ((center - def.min) / range) : START
   const at = START + SWEEP * t
   const step = (fine: boolean) => (fine || range <= 128 ? 1 : Math.max(1, Math.round(range / 128)))
   const nudge = (delta: number) => onChange(Math.max(def.min, Math.min(def.max, value + delta)))
@@ -105,7 +107,15 @@ export function Dial({ def, label, hideLabel, value, onChange }: ControlProps) {
           // A full sweep is ~200 px of travel, ten times finer with Shift.
           const px = drag.current.y - e.clientY
           const perPx = (range / 200) * (e.shiftKey ? 0.1 : 1)
-          const next = Math.round(drag.current.start + px * perPx)
+          let next = Math.round(drag.current.start + px * perPx)
+          if (center !== undefined) {
+            // Zero catches the drag for a few pixels; past it (or leaving it), values count from
+            // the end of the catch, so nothing jumps.
+            const fromZero = px - (center - drag.current.start) / perPx
+            if (Math.abs(fromZero) <= SNAP_PX) next = center
+            else if (Math.sign(fromZero) !== Math.sign(drag.current.start - center))
+              next = Math.round(center + (fromZero - Math.sign(fromZero) * SNAP_PX) * perPx)
+          }
           onChange(Math.max(def.min, Math.min(def.max, next)))
         }}
         onPointerUp={() => {
