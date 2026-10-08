@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BANK_LETTERS } from '../sysex/protocol'
 import { slotName, type Slot } from '../sync/patchSync'
 import { NOT_STORED, SlotPicker } from './SlotPicker'
+import { SpeechPatchDialog } from './SpeechPatchDialog'
 import { useEditor } from './store'
 
 function WriteDialog({ initial, onClose }: { initial: Slot; onClose: () => void }) {
@@ -163,6 +164,31 @@ function MoreMenu() {
 }
 
 /** Undo / Redo, named after the step they'd take back or redo. */
+/** Replaces the patch with one that speaks typed words (asks first: it overwrites everything). */
+function SpeechButton() {
+  const [asking, setAsking] = useState(false)
+  const [words, setWords] = useState('hello world')
+  const busy = useEditor((s) => !!s.sync?.busy)
+  const patch = useEditor((s) => s.sync?.patch)
+  if (!patch) return null
+  return (
+    <>
+      <button type="button" className="function-button" title="Make a patch that says a few English words on every note" onClick={() => setAsking(true)} disabled={busy}>
+        Speech…
+      </button>
+      {asking && (
+        <SpeechPatchDialog
+          text={words}
+          onDone={(_, w) => {
+            setAsking(false)
+            setWords(w)
+          }}
+        />
+      )}
+    </>
+  )
+}
+
 function UndoRedo() {
   const undoLabel = useEditor((s) => s.sync?.undoLabel ?? null)
   const redoLabel = useEditor((s) => s.sync?.redoLabel ?? null)
@@ -270,6 +296,7 @@ export function PatchBar() {
           <input className="patch-bar__name" aria-label="Patch name" maxLength={16} value={patch.name} onChange={(e) => setName(e.target.value)} />
         )}
         <UndoRedo />
+        <SpeechButton />
       </header>
     )
   }
@@ -331,6 +358,7 @@ export function PatchBar() {
             Write…
           </button>
           <UndoRedo />
+          <SpeechButton />
         </>
       )}
       <Status />

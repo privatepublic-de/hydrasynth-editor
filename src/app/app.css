@@ -913,6 +913,22 @@ select {
   border-radius: 3px;
 }
 
+.speech-dialog__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.speech-dialog__field input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  background: var(--recess);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+}
+
 /* Under the controls, so a long spelling never pushes them out of the panel. */
 .wavelist-fill__said {
   order: 1;

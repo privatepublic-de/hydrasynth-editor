@@ -3,6 +3,7 @@ import { loadWaveCycles } from '../ui/waveCycles'
 import { WAVE_FEATURES } from '../ui/waveFeatures.generated'
 import { FILL_STYLES, fillWavelist, type FillStyle } from '../ui/wavePopulate'
 import { harmonicLevels, speakWavelist, SILENCE } from '../ui/waveSpeech'
+import { SpeechPatchDialog } from './SpeechPatchDialog'
 import { useEditor } from './store'
 
 const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8]
@@ -32,6 +33,7 @@ export function WavelistFill({ osc }: { osc: number }) {
   const [text, setText] = useState('hello world')
   const [pitch, setPitch] = useState(1)
   const [said, setSaid] = useState('')
+  const [asking, setAsking] = useState(false)
   const key = (slot: number) => `osc${osc}wavscanwave${slot}`
   if (!patch) return null
 
@@ -86,6 +88,27 @@ export function WavelistFill({ osc }: { osc: number }) {
       <button type="button" className="function-button function-button--primary" title={`Fill all eight waves: ${description}`} onClick={() => void fill()}>
         Fill
       </button>
+      {style === SPEECH && (
+        <button
+          type="button"
+          className="function-button"
+          title="Replace the whole patch with one that says the words: Vowel filter, noise and five step LFOs"
+          onClick={() => setAsking(true)}
+          disabled={!text.trim()}
+        >
+          Speech patch…
+        </button>
+      )}
+      {asking && (
+        <SpeechPatchDialog
+          text={text}
+          onDone={(result, words) => {
+            setAsking(false)
+            setText(words)
+            if (result) setSaid(result)
+          }}
+        />
+      )}
     </span>
   )
 }

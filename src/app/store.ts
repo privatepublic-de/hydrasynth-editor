@@ -89,6 +89,8 @@ interface EditorState {
   open(slot: Slot): Promise<void>
   /** Starts from the synth's Init patch, played from H128. */
   initPatch(): Promise<void>
+  /** Replaces the open patch with `patch`, played from H128 (live: no undo; demo: one undo step). */
+  loadPatch(patch: Patch, label: string): Promise<void>
   set(key: string, value: number): void
   setName(name: string): void
   setMacroName(macro: number, name: string): void
@@ -341,6 +343,11 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   async initPatch() {
     await patchSync?.load(new Patch(initPatchBytes()), { dirty: false }).catch(() => undefined) // the error is in sync.error
+  },
+
+  async loadPatch(patch, label) {
+    if (patchSync) await patchSync.load(patch, { dirty: true }).catch(() => undefined) // the error is in sync.error
+    else demoEdit(set, get, (p) => p.bytes.set(patch.bytes), 'patch', label)
   },
 
   set(key, value) {
