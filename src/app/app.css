@@ -11,6 +11,7 @@
   --oled-text: #dfe8ee;
   --oled-dim: #6f7b84;
   --alert: #ff6b5e;
+  --mod-wire: #b43c28; /* sampled from a photo of the Desktop on ASM's site */
   --label: 'Barlow Condensed', 'Arial Narrow', sans-serif;
   --text: 'Barlow', system-ui, sans-serif;
   color-scheme: dark;
@@ -73,10 +74,6 @@ input {
   gap: 8px;
   height: 64px;
   white-space: nowrap;
-}
-
-.patch-bar .slot-picker select:last-child {
-  max-width: 18ch;
 }
 
 /* What can go first when the window is narrow: the title, then the port's name. */
@@ -147,10 +144,6 @@ select {
 .slot-picker {
   display: inline-flex;
   gap: 6px;
-}
-
-.slot-picker select:last-child {
-  max-width: 24ch;
 }
 
 .status {
@@ -252,8 +245,10 @@ select {
   stroke-width: 2;
 }
 
+/* The Env and LFO rows are printed in red on the panel; the audio path and the
+   dotted links down are grey. */
 .wire--bus {
-  stroke: #7c8187;
+  stroke: var(--mod-wire);
   stroke-width: 5;
 }
 
@@ -1167,4 +1162,155 @@ select {
 .restore-dialog__differences ul {
   margin: 0.25rem 0 0.5rem;
   padding-left: 1.2rem;
+}
+
+/* --- slot picker: bank and patch in one ------------------------------------ */
+.slot-picker__button {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 22ch;
+  max-width: 30ch;
+  padding: 5px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  background: var(--recess);
+  color: var(--lit);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.slot-picker__button:hover,
+.slot-picker__button[aria-expanded='true'] {
+  border-color: var(--print);
+}
+
+.slot-picker__slot {
+  font: 600 15px/1 var(--label);
+  color: var(--access);
+}
+
+.slot-picker__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slot-picker__panel {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 8px;
+  width: min(720px, calc(100vw - 16px));
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--lit);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  white-space: normal;
+}
+
+.slot-picker__search {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  background: var(--recess);
+  color: var(--lit);
+  font: inherit;
+}
+
+.slot-picker__body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.slot-picker__banks {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+}
+
+.slot-picker__bank {
+  width: 34px;
+  height: 30px;
+  border: 1px solid #3a3d41;
+  border-radius: 3px;
+  background: #101112;
+  color: var(--access);
+  font: 600 16px/1 var(--label);
+  cursor: pointer;
+}
+
+.slot-picker__bank[aria-selected='true'] {
+  background: var(--lit);
+  color: #1a1a1a;
+}
+
+/* 128 patches in four columns of 32, numbered down the columns like a bank listing. */
+.slot-picker__patches {
+  display: grid;
+  grid-template-rows: repeat(32, max-content);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  column-gap: 6px;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+
+.slot-picker__results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  align-content: start;
+  grid-auto-rows: max-content;
+  column-gap: 6px;
+  grid-column: 1 / -1;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+
+.slot-picker__patch {
+  display: block;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--lit);
+  font: 14px/1.35 var(--text);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.slot-picker__patch:hover,
+.slot-picker__patch:focus-visible {
+  background: #3a3d41;
+  outline: none;
+}
+
+.slot-picker__patch[aria-selected='true'] {
+  background: var(--access);
+  color: #1a1a1a;
+}
+
+.slot-picker__number {
+  display: inline-block;
+  min-width: 2.6ch;
+  color: var(--print);
+  font: 500 13px/1 var(--label);
+}
+
+.slot-picker__patch[aria-selected='true'] .slot-picker__number {
+  color: #1a1a1a;
+}
+
+.slot-picker__note {
+  color: var(--print);
+  margin: 4px 6px;
 }

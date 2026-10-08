@@ -1,37 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { BANK_LETTERS } from '../sysex/protocol'
 import { slotName, type Slot } from '../sync/patchSync'
+import { NOT_STORED, SlotPicker } from './SlotPicker'
 import { useEditor } from './store'
-
-/** The patch selector's value while the open patch (Init, a file) isn't stored in a slot. */
-const NOT_STORED = -1
-
-export function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot) => void }) {
-  const names = useEditor((s) => s.bankNames[slot.bank])
-  const loadBankNames = useEditor((s) => s.loadBankNames)
-  useEffect(() => {
-    if (!names) loadBankNames(slot.bank).catch(() => undefined)
-  }, [slot.bank, names, loadBankNames])
-  return (
-    <span className="slot-picker">
-      <select aria-label="Bank" value={slot.bank} onChange={(e) => onChange({ bank: Number(e.target.value), patch: slot.patch })}>
-        {[...BANK_LETTERS].map((l, i) => (
-          <option key={l} value={i}>
-            Bank {l}
-          </option>
-        ))}
-      </select>
-      <select aria-label="Patch" value={slot.patch} onChange={(e) => onChange({ bank: slot.bank, patch: Number(e.target.value) })}>
-        {slot.patch === NOT_STORED && <option value={NOT_STORED}>Not stored</option>}
-        {Array.from({ length: 128 }, (_, i) => (
-          <option key={i} value={i}>
-            {i + 1} {names?.[i] ?? ''}
-          </option>
-        ))}
-      </select>
-    </span>
-  )
-}
 
 function WriteDialog({ initial, onClose }: { initial: Slot; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null)

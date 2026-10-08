@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Patch } from '../params/patch'
 import { slotLabel, type RestorePhase } from '../library/restore'
 import { BANK_LETTERS, PATCHES_PER_BANK } from '../sysex/protocol'
-import { SlotPicker } from './PatchBar'
+import { SlotPicker } from './SlotPicker'
 import { useEditor } from './store'
 
 const PHASE_TEXT: Record<RestorePhase, string> = {

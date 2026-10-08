@@ -41,12 +41,13 @@ export function Pads() {
   return (
     <section className="pads" aria-label="Pads">
       <div className="pads__octave">
-        <button type="button" className="function-button" onClick={() => setBase((b) => Math.max(0, b - 12))} disabled={base <= 0}>
-          Oct −
-        </button>
-        <span>{noteName(base)}</span>
+        {/* Up on top, down below, like the pad rows. */}
         <button type="button" className="function-button" onClick={() => setBase((b) => Math.min(96, b + 12))} disabled={base >= 96}>
           Oct +
+        </button>
+        <span>{noteName(base)}</span>
+        <button type="button" className="function-button" onClick={() => setBase((b) => Math.max(0, b - 12))} disabled={base <= 0}>
+          Oct −
         </button>
       </div>
       <button type="button" className="function-button pads__latch" aria-pressed={latch} onClick={toggleLatch} title="Notes keep sounding until their pad is tapped again or Latch is switched off">
