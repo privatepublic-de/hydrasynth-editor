@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PARAMS } from '../src/params/generated'
-import { Patch } from '../src/params/patch'
+import { Patch, param } from '../src/params/patch'
 import { RULE_PATTERNS, isShown } from '../src/ui/visibility'
 import { fixtureBytes } from './fakeSynth'
 
@@ -29,6 +29,33 @@ describe('control visibility', () => {
     expect(isShown('filter1vowelorder', p)).toBe(false)
   })
 
+  it('shows each Mutant mode only the controls the synth shows', () => {
+    const p = patch()
+    const shown = (mode: number) => {
+      p.set('mutant1mode', mode)
+      const keys = ['sourcefmlin', 'sourceoscsync', 'ratio', 'depth', 'window', 'feedback', 'warp3', 'wet']
+      return keys.filter((k) => p.isActive(param(`mutant1${k}`)) && isShown(`mutant1${k}`, p))
+    }
+    p.set('mutant1sourcefmlin', 0)
+    expect(shown(0)).toEqual(['sourcefmlin', 'ratio', 'depth', 'feedback', 'wet'])
+    p.set('mutant1sourcefmlin', 2)
+    expect(shown(0)).toEqual(['sourcefmlin', 'depth', 'feedback', 'wet'])
+    expect(shown(1)).toEqual(['depth', 'wet'])
+    expect(shown(2)).toEqual(['sourceoscsync', 'ratio', 'depth', 'window', 'feedback', 'wet'])
+    expect(shown(3)).toEqual(['ratio', 'depth', 'feedback', 'wet'])
+    expect(shown(5)).toEqual(['ratio', 'depth', 'feedback', 'warp3', 'wet'])
+    expect(shown(7)).toEqual(['depth', 'feedback', 'wet'])
+  })
+
+  it('gives the FX knobs no meaning under Bypass, so only Dry/Wet remains', () => {
+    const p = patch()
+    p.set('prefxtype', 0)
+    const fxParams = PARAMS.filter((d) => /^prefx\dparam\d$/.test(d.key))
+    expect(fxParams.filter((d) => p.isActive(d))).toEqual([])
+    p.set('prefxtype', 7)
+    expect(fxParams.filter((d) => p.isActive(d)).map((d) => d.key)).toEqual(['prefx7param1', 'prefx7param2', 'prefx7param3', 'prefx7param4', 'prefx7param5'])
+  })
+
   it('has no rule that matches no param', () => {
     for (const re of RULE_PATTERNS) expect(PARAMS.some((d) => re.test(d.key)), String(re)).toBe(true)
   })
@@ -36,7 +63,7 @@ describe('control visibility', () => {
   it('hides a matching key and shows everything else', () => {
     const hidden = PARAMS.filter((d) => !isShown(d.key, patch())).map((d) => d.key)
     expect(hidden.length).toBeGreaterThan(0)
-    expect(hidden.every((k) => /^(osc|filter1|prefx|postfx|voiceglide|env|lfo)/.test(k))).toBe(true)
+    expect(hidden.every((k) => /^(osc|mutant|filter1|prefx|postfx|voiceglide|env|lfo)/.test(k))).toBe(true)
   })
 })
 

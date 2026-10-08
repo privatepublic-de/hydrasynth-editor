@@ -68,18 +68,27 @@ function WaveThumb({ patch, paramKey }: { patch: Patch; paramKey: string }) {
   )
 }
 
-/** The key a slot shows right now: the alternative whose mode is active. */
-function activeKey(slot: Exclude<Slot, null>, isActive: (key: string) => boolean): string {
+/**
+ * The key a slot shows right now: the alternative whose mode is active, or null when none is
+ * (an FX knob under Bypass, which has no parameters).
+ */
+function activeKey(slot: Exclude<Slot, null>, isActive: (key: string) => boolean): string | null {
   if (typeof slot === 'string') return slot
-  return slot.find(isActive) ?? slot[0]
+  return slot.find(isActive) ?? null
+}
+
+/** The key to show for a slot, or null for an empty knob position. */
+function visibleKey(slot: Slot, patch: Patch): string | null {
+  if (slot === null) return null
+  const key = activeKey(slot, (k) => patch.isActive(param(k)))
+  return key !== null && isShown(key, patch) ? key : null
 }
 
 function PageView({ title, slots }: { title: string; slots: Slot[] }) {
   const patch = useEditor((s) => s.sync?.patch)
   useEditor((s) => s.sync?.revision)
   if (!patch) return null
-  const isActive = (key: string) => patch.isActive(param(key))
-  const shown = slots.map((slot) => (slot === null ? null : activeKey(slot, isActive))).map((k) => (k && isShown(k, patch) ? k : null))
+  const shown = slots.map((slot) => visibleKey(slot, patch))
   if (shown.every((k) => k === null)) return null
   return (
     <section className="page">
@@ -108,8 +117,7 @@ function TableView({ title, rows }: { title: string; rows: Page[] }) {
   const patch = useEditor((s) => s.sync?.patch)
   useEditor((s) => s.sync?.revision)
   if (!patch) return null
-  const isActive = (key: string) => patch.isActive(param(key))
-  const visibleRows = rows.filter((row) => row.slots.some((slot) => slot !== null && isShown(activeKey(slot, isActive), patch)))
+  const visibleRows = rows.filter((row) => row.slots.some((slot) => visibleKey(slot, patch) !== null))
   if (visibleRows.length === 0) return null
   rows = visibleRows
   const steps = title === 'Step Edit' && firstKey(rows)?.match(/^lfo(\d)step/)
@@ -128,8 +136,8 @@ function TableView({ title, rows }: { title: string; rows: Page[] }) {
       <section className="page page--wide">
         <h3 className="page__title">{title}</h3>
         <div className="param-table-halves">
-          <ParamTable rows={rows.slice(0, half)} isActive={isActive} />
-          <ParamTable rows={rows.slice(half)} isActive={isActive} />
+          <ParamTable rows={rows.slice(0, half)} />
+          <ParamTable rows={rows.slice(half)} />
         </div>
       </section>
     )
@@ -140,7 +148,7 @@ function TableView({ title, rows }: { title: string; rows: Page[] }) {
         {title}
         {/^Macro \d$/.test(title) && <MacroName macro={Number(title.slice(6))} />}
       </h3>
-      <ParamTable rows={rows} isActive={isActive} />
+      <ParamTable rows={rows} />
     </section>
   )
 }
@@ -152,9 +160,12 @@ function firstKey(rows: Page[]): string | undefined {
   return slot === undefined || slot === null ? undefined : typeof slot === 'string' ? slot : slot[0]
 }
 
-function ParamTable({ rows, isActive }: { rows: Page[]; isActive: (key: string) => boolean }) {
+function ParamTable({ rows }: { rows: Page[] }) {
   const patch = useEditor((s) => s.sync?.patch)!
-  const columns = rows[0].slots.map((slot) => (slot === null ? '' : columnName(param(activeKey(slot, isActive)).labels[0] ?? '')))
+  const columns = rows[0].slots.map((_, i) => {
+    const key = rows.map((r) => visibleKey(r.slots[i], patch)).find((k) => k !== null)
+    return key ? columnName(param(key).labels[0] ?? '') : ''
+  })
   return (
       <table className="param-table">
         <thead>
@@ -172,8 +183,8 @@ function ParamTable({ rows, isActive }: { rows: Page[]; isActive: (key: string) 
             <tr key={r}>
               <th scope="row">{row.title.replace(/^Macro \d /, '')}</th>
               {row.slots.map((slot, i) => {
-                const key = slot === null ? null : activeKey(slot, isActive)
-                if (key === null || !isShown(key, patch)) return <td key={i} />
+                const key = visibleKey(slot, patch)
+                if (key === null) return <td key={i} />
                 const label = param(key).labels[0] ?? key
                 return (
                   <td key={i}>

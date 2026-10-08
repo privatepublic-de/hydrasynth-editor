@@ -8,6 +8,12 @@ const VOWEL_TYPES = [10, 16]
 const COMPRESSOR = 8
 const LFO_STEP_WAVE = 10
 
+/** Mutant modes (mutantNmode) and which of them use each control (manual 2.0, pp. 35-39). */
+const FM_LIN = 0, WAVSTACK = 1, OSC_SYNC = 2, PW_ASM = 5
+const USES_RATIO = [2, 3, 4, 5, 6]
+/** FM-Lin's Ratio only tunes its own Sine or Triangle source. */
+const FM_OWN_SOURCES = [0, 1]
+
 const RULES: [RegExp, (p: Patch, m: RegExpMatchArray) => boolean][] = [
   // Single mode plays one wave; WaveScan mode scans the Wavelist.
   [/^(osc[12])type$/, (p, m) => p.get(`${m[1]}mode`) === 0],
@@ -16,6 +22,17 @@ const RULES: [RegExp, (p: Patch, m: RegExpMatchArray) => boolean][] = [
   [/^(pre|post)fxsidechain$/, (p, m) => p.get(`${m[1]}fxtype`) === COMPRESSOR],
   // The synth only takes LFO steps while the wave is Step (Edisyn's notes); unset they read 0.
   [/^(lfo\d)step(s|\d+)$/, (p, m) => p.get(`${m[1]}wave`) === LFO_STEP_WAVE],
+  [/^(mutant\d)source(fmlin|oscsync)$/, (p, m) => [FM_LIN, OSC_SYNC].includes(p.get(`${m[1]}mode`))],
+  [
+    /^(mutant\d)ratio$/,
+    (p, m) => {
+      const mode = p.get(`${m[1]}mode`)
+      return USES_RATIO.includes(mode) || (mode === FM_LIN && FM_OWN_SOURCES.includes(p.get(`${m[1]}sourcefmlin`)))
+    },
+  ],
+  [/^(mutant\d)window$/, (p, m) => p.get(`${m[1]}mode`) === OSC_SYNC],
+  [/^(mutant\d)feedback$/, (p, m) => p.get(`${m[1]}mode`) !== WAVSTACK],
+  [/^(mutant\d)warp\d$/, (p, m) => p.get(`${m[1]}mode`) === PW_ASM],
   [/^voiceglide(time|curve|legato)$/, (p) => p.get('voiceglide') !== 0],
   [/^env\dlegato$/, (p) => p.get('voicepolyphony') !== 0],
   [/^(env\d)reset$/, (p, m) => p.get(`${m[1]}legato`) === 0],
