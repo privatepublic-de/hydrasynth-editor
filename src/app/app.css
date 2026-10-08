@@ -899,7 +899,7 @@ select {
 .wavelist__cells {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px 8px;
+  gap: 14px 8px;
 }
 
 .wave-cell {
@@ -910,6 +910,16 @@ select {
 
 .wave-cell .choice select {
   margin-top: 0;
+}
+
+/* The wave's select sits right under its picture: its caption is for screen readers only, so it
+   takes no room (unless it shows something, like a modulation badge). */
+.wave-cell .control__head:not(:has(> :not(.visually-hidden))) {
+  position: absolute;
+}
+
+.wave-cell .control {
+  gap: 0;
 }
 
 .wave-cell__picture {
@@ -1315,4 +1325,27 @@ select {
 .slot-picker__note {
   color: var(--print);
   margin: 4px 6px;
+}
+
+/* --- wave pictures: the recorded cycle over the harmonic bars ----------------------------- */
+.wave-picture {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #000;
+}
+
+.wave-picture__line {
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.wave-cell .wave-picture,
+.wave-cell__stepper img {
+  height: 100%;
+}
+
+.wave-cell .wave-picture__line {
+  stroke-width: 1.5px;
 }

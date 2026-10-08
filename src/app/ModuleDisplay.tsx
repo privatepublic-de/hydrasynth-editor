@@ -5,9 +5,11 @@ import { useRef } from 'react'
 import { param, type Patch } from '../params/patch'
 import { F_MAX, F_MIN, cutoffHz, filter1Gain, filter2Gain, responseCurve } from '../ui/filterResponse'
 import { envelopeShape, lfoAt, lfoLevel, type Point } from '../ui/shapes'
-import { morphAt, waveImage } from '../ui/waves'
+import { useWaveCycles } from '../ui/waveCycles'
+import { morphAt } from '../ui/waves'
 import { Stepper } from './controls/Stepper'
 import { useEditor, useGesture } from './store'
+import { WaveMorphPicture, WavePicture } from './WavePicture'
 
 const W = 360
 const H = 140
@@ -156,7 +158,7 @@ function OscWave({ patch, osc }: { patch: Patch; osc: number }) {
   if (!scanning) {
     return (
       <Stepper paramKey={`${p}type`}>
-        <img className="screen__wave" src={waveImage(patch.get(`${p}type`))} alt="" draggable={false} />
+        <WavePicture className="screen__wave" wave={patch.get(`${p}type`)} />
       </Stepper>
     )
   }
@@ -166,16 +168,26 @@ function OscWave({ patch, osc }: { patch: Patch; osc: number }) {
 /** WaveScan: what the position plays, the two waves around it crossfaded by how far it is between them. */
 function Morph({ patch, osc }: { patch: Patch; osc: number }) {
   const m = morphAt(patch, osc)
+  const recorded = useWaveCycles()
+  const label = m ? `WaveScan between wave ${m.from.slot}${m.to ? ` and ${m.to.slot}` : ''}` : 'WaveScan'
+  // With the recordings: the mixed cycle, as a scope shows it. Until then: the two pictures crossfaded.
+  if (recorded && m) {
+    return (
+      <div className="screen__morph" role="img" aria-label={label}>
+        <WaveMorphPicture className="screen__morph-layer" from={m.from.wave} to={m.to?.wave} towards={m.towards} />
+      </div>
+    )
+  }
   const layer = (wave: number | 'silence' | undefined, opacity: number) =>
     wave === undefined || opacity <= 0 ? null : wave === 'silence' ? (
       <div className="screen__morph-layer screen__silence" style={{ opacity }}>
         Silence
       </div>
     ) : (
-      <img className="screen__morph-layer" src={waveImage(wave)} alt="" draggable={false} style={{ opacity }} />
+      <WavePicture className="screen__morph-layer" wave={wave} style={{ opacity }} />
     )
   return (
-    <div className="screen__morph" role="img" aria-label={m ? `WaveScan between wave ${m.from.slot}${m.to ? ` and ${m.to.slot}` : ''}` : 'WaveScan'}>
+    <div className="screen__morph" role="img" aria-label={label}>
       {layer(m?.from.wave, 1 - (m?.towards ?? 0))}
       {layer(m?.to?.wave, m?.towards ?? 0)}
     </div>

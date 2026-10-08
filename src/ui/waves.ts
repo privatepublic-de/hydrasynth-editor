@@ -1,7 +1,10 @@
 import type { Patch } from '../params/patch'
 
-/** Wave pictures by Thierry Rochebois Zic (CC BY 4.0, see public/waves/README.txt), one per wave 0..218. */
-export const waveImage = (wave: number) => `${import.meta.env.BASE_URL}waves/${wave}.png`
+/**
+ * Wave pictures by Thierry Rochebois Zic (CC BY 4.0, see public/waves/README.txt), one per wave
+ * 0..218, without the wave's name (tools/stripWaveNames.ts): the editor shows it beside them.
+ */
+export const waveImage = (wave: number) => `${import.meta.env.BASE_URL}waves-plain/${wave}.png`
 
 /**
  * The wave a param's value selects, 'silence', or null for Off (and for keys that aren't

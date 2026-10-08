@@ -4,10 +4,11 @@
 import { useRef } from 'react'
 import { formatValue } from '../params/display'
 import { param } from '../params/patch'
-import { entryPositions, slotShares, waveImage, waveOf } from '../ui/waves'
+import { entryPositions, slotShares, waveOf } from '../ui/waves'
 import { ParamControl } from './controls/ParamControl'
 import { Stepper } from './controls/Stepper'
 import { useEditor, useGesture } from './store'
+import { WavePicture } from './WavePicture'
 import { WavelistFill } from './WavelistFill'
 
 const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8]
@@ -51,7 +52,7 @@ function WaveCell({ osc, slot, share }: { osc: number; slot: number; share: numb
           {wave === 'silence' ? (
             <div className="wave-cell__silence">Silence</div>
           ) : (
-            <img src={waveImage(wave)} alt="" draggable={false} />
+            <WavePicture wave={wave} />
           )}
         </Stepper>
         <span className="wave-cell__slot">{slot}</span>

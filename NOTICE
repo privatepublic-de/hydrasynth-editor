@@ -19,3 +19,10 @@ public/waves/ holds Thierry Rochebois Zic's Hydrasynth wave images, CC BY 4.0, a
 colour-inverted by Sean Luke for Edisyn; see public/waves/README.txt.
 src/ui/waveFeatures.generated.ts is measured from those images (tools/analyzeWaves.ts):
 each wave's harmonic levels and roughness as the pictures show them.
+public/waves-plain/ holds the same images with the wave's name removed (tools/stripWaveNames.ts),
+CC BY 4.0 as well; the editor shows them only until public/wave-cycles.json has loaded.
+public/wave-cycles.json holds one cycle per wave recorded from the synth's audio output
+(tools/recordWaves.ts, tools/recordPhases.ts, tools/extractCycles.ts), drawn in the colours of those images: their
+line colour and harmonic bars (CC BY 4.0).
+public/waves-plain/ holds the same images with the wave's name removed (tools/stripWaveNames.ts),
+CC BY 4.0 as well.
