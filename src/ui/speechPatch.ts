@@ -8,7 +8,8 @@
 //   LFO 5 -> Osc 1 Pitch     intonation: stressed syllables up, the phrase falling
 // Macro 1 (Speed) moves all five LFOs' rates together, from ~0.43x to ~2.3x, normal in the middle;
 // Macro 2 (Fundamental) fades in OSC 3, a Saw at the note played that follows the voicing, for
-// melodic speech and chords.
+// melodic speech and chords. Macro 3 (Voice) scales all formants (Formant Control): the middle is
+// the voice as tuned, up a smaller (female, child) one, down a larger one.
 // ENV 2 (the Amp's) just gates the note; the last step is silent and a one-shot LFO holds it.
 // With `waves`, OSC 1 plays a WaveScan list of waves whose harmonics already show each sound's
 // formants at the note it's tuned for (src/ui/waveSpeech.ts) instead of the Saw; LFO 5 then steps
@@ -385,7 +386,8 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   p.set('mixerosc1filterratio', 0)
   p.set('mixernoisefilterratio', 1024)
   p.set('filter1type', 10)
-  p.set('filter1special', 512)
+  // Formant Control 64, the place every vowel is tuned at, with the Voice macro in its middle.
+  p.set('filter1special', 512 - VOICE_CENTER)
   p.set('filter1resonance', 576)
   p.set('filter1keytrack', 512)
   p.set('filter1cutoff', 512)
@@ -536,6 +538,13 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   p.set('macro2target1', 161) // Matrix 8 Depth
   p.set('macro2depth1', 512 + 64 * 4)
 
+  // Macro 3, Voice: Formant Control from 48 (larger, deeper) through 64 (as tuned, the default) to
+  // 80 (smaller: formants ~18-24 % higher, about a woman's; tools/calibrateSpeech.ts control).
+  p.setMacroName(3, 'Voice')
+  p.set('macro3panelvalue', 512)
+  p.set('macro3target1', 91) // Filt 1 Control
+  p.set('macro3depth1', 512 + VOICE_DEPTH * 4)
+
   // A stop's closure and burst are one sound.
   const sounds = segments.map((s) => s.sound).filter((s, i, all) => !(s in STOP && all[i - 1] === s))
   return { patch: p, sounds, ms: Math.round(total * t.stepMs), dropped, order: order.name }
@@ -544,6 +553,10 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
 /** Depth (of 128) of the Speed macro on the LFO rates: 192 raw over the knob, 96 to either side of the middle. */
 const SPEED_DEPTH = 24
 const SPEED_CENTER = SPEED_DEPTH * 4
+
+/** Depth (of 128) of the Voice macro on Formant Control: 256 raw over the knob, 128 to either side of the middle. */
+const VOICE_DEPTH = 32
+const VOICE_CENTER = VOICE_DEPTH * 4
 
 /** Depth (of 128) of LFO 4's route to Formant Control. */
 const CONTROL_DEPTH = 16

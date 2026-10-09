@@ -66,7 +66,7 @@ describe('buildSpeechPatch', () => {
     expect(long.patch.get('lfo1steps')).toBe(64)
   })
 
-  it('has a Speed macro on all five LFO rates, and a Fundamental macro fading in OSC 3 with the voicing', () => {
+  it('has Speed (LFO rates), Fundamental (OSC 3 with the voicing) and Voice (Formant Control) macros', () => {
     const s = buildSpeechPatch('hello world')!
     expect(s.patch.macroName(1)).toBe('Speed')
     expect(show(s, 'macro1panelvalue')).toBe('64,0')
@@ -77,6 +77,10 @@ describe('buildSpeechPatch', () => {
     expect(show(s, 'modmatrix8modsource')).toBe('LFO 2')
     expect(show(s, 'modmatrix8modtarget')).toBe('Osc 3 Vol')
     expect(show(s, 'osc3type')).toBe('Saw')
+    expect(s.patch.macroName(3)).toBe('Voice')
+    expect(show(s, 'macro3target1')).toBe('Filt 1 Control')
+    // Formant Control 64 (raw 512) with the Voice knob in its middle: base + 64/128 * 32/128 * 1024.
+    expect(s.patch.get('filter1special') + 128).toBe(512)
     expect(show(s, 'mixerosc3vol')).toBe('0,0')
   })
 
