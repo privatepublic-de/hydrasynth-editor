@@ -17,6 +17,8 @@
 //                    LFO into Osc 1 Vol at route depth 0, knob 0, 64 and 128, against static volumes
 //   morphs           the Vowel filter's sound between every pair of its vowels (four orders cover
 //                    all ten pairs), Cutoff in steps of 32: src/ui/vowelMorphs.generated.ts
+//   envattack [raw]  ENV 3 Attack (default 576) on Osc 1 Pitch at depth 32, with ATTACK_CURVE
+//                    (env, default 64 = linear): semitones over time, for the question rise
 //   positions        Saw through the Vowel filter, Cutoff in steps of 32: the best Cutoff per vowel
 //   scan             six waves in the WaveScan list, a Step LFO on Osc 1 WaveScan to slot 0..5: which wave sounds
 //   speak <words> [waves]  the speech patch (src/ui/speechPatch.ts) at C3, saved to local/speech-samples
@@ -358,6 +360,22 @@ ${Object.keys(pairs)
 `
     writeFileSync('src/ui/vowelMorphs.generated.ts', src)
     console.log(`${Object.keys(pairs).length} pairs written to src/ui/vowelMorphs.generated.ts`)
+  } else if (experiment === 'envattack') {
+    const p = initPatch()
+    p.set('osc1type', 0)
+    p.set('env3bpmsync', 0)
+    p.set('env3attacksyncoff', Number(arg ?? 576))
+    p.set('env3atkcurve', Number(process.env.ATTACK_CURVE ?? 64))
+    p.set('env3holdsyncoff', 0)
+    p.set('env3decaysyncoff', 0)
+    p.set('env3sustain', 1024)
+    p.set('modmatrix1modsource', 3) // Env 3
+    p.set('modmatrix1modtarget', 11)
+    p.set('modmatrix1depth', 512 + 32 * 4) // +32: full envelope 3.2 semitones
+    const x = await take(p, 48, 2.2)
+    const line: string[] = []
+    for (let t = 0.05; t < 2.1; t += 0.1) line.push(`${t.toFixed(2)}:${(12 * Math.log2(frequency(x, Math.round(t * RATE), 2400) / 130.81)).toFixed(2)}`)
+    console.log(line.join(' '))
   } else if (experiment === 'positions') {
     const vowels = ['iy', 'ih', 'eh', 'ae', 'aa', 'ah', 'ao', 'ow', 'uh', 'uw', 'er', 'w', 'y', 'r', 'l']
     const values = Array.from({ length: 33 }, (_, i) => Math.min(1024, i * 32))
@@ -471,7 +489,7 @@ ${Object.keys(pairs)
       console.log(`${String(t).padStart(4)} ms ${bandBar(x, Math.round((t / 1000) * RATE))} cutoff ${512 + plan(1) * 8} voice ${plan(2) * 2} noise ${plan(3) * 2}`)
     }
     mkdirSync('local/speech-samples', { recursive: true })
-    const out = `local/speech-samples/${arg.replace(/\W+/g, '-')}${withWaves ? '-waves' : '-saw'}${process.env.SUFFIX ?? ''}.wav`
+    const out = `local/speech-samples/${arg.replace(/\?/g, ' Q').trim().replace(/\W+/g, '-')}${withWaves ? '-waves' : '-saw'}${process.env.SUFFIX ?? ''}.wav`
     copyFileSync(FILE, out)
     console.log('saved', out)
   } else if (experiment === 'sources') {

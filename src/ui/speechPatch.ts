@@ -5,7 +5,7 @@
 //   LFO 2 -> Osc 1 Vol       voicing: on for vowels and voiced consonants, off for s, t, gaps
 //   LFO 3 -> Noise Vol       hiss, bursts of stops, h
 //   LFO 4 -> Filt 2 Cutoff   where the hiss sits: s high, sh lower, p/t/k bursts by place
-//   LFO 5 -> Osc 1 Pitch     intonation: stressed syllables up, the phrase falling
+//   LFO 5 -> Osc 1 Pitch     the melody: a peak on the main stress and a fall, or a yes/no rise
 // Macro 1 (Speed) moves all five LFOs' rates together, from ~0.43x to ~2.3x, normal in the middle;
 // Macro 2 (Fundamental) fades in OSC 3, a Saw at the note played that follows the voicing, for
 // melodic speech and chords. Macro 3 (Voice) scales all formants (Formant Control): the middle is
@@ -13,7 +13,7 @@
 // ENV 2 (the Amp's) just gates the note; the last step is silent and a one-shot LFO holds it.
 // With `waves`, OSC 1 plays a WaveScan list of waves whose harmonics already show each sound's
 // formants at the note it's tuned for (src/ui/waveSpeech.ts) instead of the Saw; LFO 5 then steps
-// WaveScan, and ENV 3 lets the phrase fall in pitch (stressed syllables no longer rise).
+// WaveScan, and ENV 3 lets the phrase fall (or a yes/no question rise) in pitch: no melody on its syllables.
 //
 // Measured on a Hydrasynth Desktop (fw 2.x) with tools/calibrateSpeech.ts; see CALIBRATION.
 import { formatValue } from '../params/display'
@@ -68,17 +68,69 @@ export const VOWEL_POS: Record<string, number> = {
 }
 const DIPHTHONGS: Record<string, [string, string]> = { ey: ['eh', 'iy'], ay: ['aa', 'iy'], aw: ['aa', 'uw'], ow: ['ow', 'uw'], oy: ['ao', 'iy'] }
 const bandRaw = (hz: number) => Math.round(512 + CALIBRATION.bandOctaveRaw * Math.log2(hz / CALIBRATION.bandAt512Hz))
-/** Hisses: noise level (0..128) and band centre. Voiced ones keep some voice; v and dh are mostly that. */
+/** Hisses: noise level (0..128) and band centre. Voiced ones keep some voice; v is mostly that. */
 const HISS: Record<string, { noise: number; hz: number; voice: number }> = {
-  s: { noise: 110, hz: 6000, voice: 0 },
-  z: { noise: 80, hz: 6000, voice: 70 },
-  sh: { noise: 110, hz: 2800, voice: 0 },
-  zh: { noise: 80, hz: 2800, voice: 70 },
+  s: { noise: 110, hz: 7000, voice: 0 },
+  z: { noise: 80, hz: 7000, voice: 70 },
+  sh: { noise: 120, hz: 2300, voice: 0 },
+  zh: { noise: 80, hz: 2300, voice: 70 },
   f: { noise: 60, hz: 7000, voice: 0 },
   v: { noise: 25, hz: 7000, voice: 70 },
   th: { noise: 55, hz: 6500, voice: 0 },
-  dh: { noise: 20, hz: 6500, voice: 70 },
+  dh: { noise: 35, hz: 6500, voice: 45 },
 }
+/** The words of `text` as pronounce() splits them. */
+const wordsOf = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z' ]/g, ' ')
+    .split(/\s+/)
+    .map((w) => w.replace(/^'+|'+$/g, ''))
+    .filter(Boolean)
+/** Words that carry no accent in a phrase's melody, though the dictionary stresses some of them. */
+const FUNCTION_WORDS = new Set(
+  ('a an the and or but of to in on at for with from by as if so not no is are am was were be been being do does did have has had ' +
+    'can could will would shall should may might must i you he she it we they me him her us them my your his its our their this that these those')
+    .split(' '),
+)
+/** Words that start a question that falls (how are you?) rather than rises (are you ready?). */
+const WH_WORDS = new Set(['what', 'why', 'where', 'when', 'who', 'whom', 'whose', 'which', 'how'])
+
+/**
+ * The phrase's melody, semitones per LFO step (0 = the note played). Its nucleus, the last
+ * accented syllable (a content word's stress), carries the tune: a statement or a wh-question
+ * peaks there (stressLift) and falls to -2 by the end; a yes/no question dips there and rises by
+ * questionRise. Accented syllables before it get smaller peaks on a line gently falling from +1.
+ */
+function melody(segments: Segment[], counts: number[], yesNo: boolean, tune: Tuning): (step: number) => number {
+  const starts = counts.map((_, i) => counts.slice(0, i).reduce((a, b) => a + b, 0))
+  const total = counts.reduce((a, b) => a + b, 0)
+  const last = (f: (s: Segment) => boolean | undefined) => segments.map((s) => !!f(s)).lastIndexOf(true)
+  let nucleus = last((s) => s.accent)
+  if (nucleus < 0) nucleus = last((s) => s.vowel)
+  if (nucleus < 0) return () => 0
+  // A diphthong's halves are one syllable: the nucleus is both.
+  if (nucleus > 0 && isDiphthongPair(segments[nucleus - 1].sound, segments[nucleus].sound)) nucleus--
+  const halves = isDiphthongPair(segments[nucleus].sound, segments[nucleus + 1]?.sound) ? 2 : 1
+  const [from, to] = [starts[nucleus], starts[nucleus] + counts.slice(nucleus, nucleus + halves).reduce((a, b) => a + b, 0)]
+  const peak = yesNo ? -0.5 : tune.stressLift
+  const end = yesNo ? tune.questionRise : -2
+  const segmentAt = (step: number) => starts.filter((st) => st <= step).length - 1
+  return (step) => {
+    if (step < from) {
+      const s = segments[segmentAt(step)]
+      return 1 - step / Math.max(1, from) + (s?.accent ? 0.6 * tune.stressLift : 0)
+    }
+    // After the nucleus, glide to the end; a nucleus at the very end does it within itself.
+    if (to < total) return step < to ? peak : peak + ((end - peak) * (step - to)) / (total - to)
+    return peak + ((end - peak) * (step - from)) / Math.max(1, total - from)
+  }
+}
+
+/** Whether `a` then `b` are the two halves of one diphthong. */
+const isDiphthongPair = (a?: string, b?: string) =>
+  !!a && !!b && (Object.values(DIPHTHONGS).some(([x, y]) => x === a && y === b) || (a === 'eh' && b === 'ih'))
+
 /** Where in the mouth a consonant is made: it bends the formants of the vowels next to it. */
 type Place = 'lips' | 'teeth' | 'ridge' | 'palate' | 'velum'
 const PLACE: Record<string, Place> = {
@@ -141,13 +193,14 @@ interface Segment {
   voice: number
   noise: number
   band: number
-  pitch: number
   /** The voiced sound whose wave OSC 1 plays (null: the next one's, like `pos`). */
   shape: string | null
   /** Formant Control above its 64 (raw), for vowels the sweep can't make at 64 (the a of cat). */
   control: number
   /** A vowel (or half of a diphthong). */
   vowel: boolean
+  /** A stressed vowel of a content word (not the, you, are, ...): where the melody's accents go. */
+  accent?: boolean
   /**
    * A consonant's part that leans on its vowel (the one before or after, in the same word): its
    * place is where that vowel's formants start or end next to this consonant (locusPos).
@@ -224,6 +277,16 @@ export interface Tuning {
    */
   eyStart: number
   eyEnd: number
+  /** Filter 2 (the noise's band-pass) for every hiss: Morph (512 band-pass, toward 1024 high-pass) and resonance (raw). */
+  hissMorph: number
+  hissResonance: number
+  /**
+   * How far (semitones) a yes/no question rises after its nucleus (see melody); 4 over its whole
+   * last part sounded like a patronising teacher.
+   */
+  questionRise: number
+  /** How high (semitones) the nucleus of a statement or wh-question peaks (melody; only without waves, where LFO 5 draws pitch). */
+  stressLift: number
 }
 /**
  * Chosen by ear from tools/tuneSpeech.ts runs: longer vowel glides scored smoother still (160 ms:
@@ -259,6 +322,10 @@ export const TUNING: Tuning = {
   locusPull: 0.75,
   eyStart: E,
   eyEnd: between(E, I, 0.5),
+  hissMorph: 512,
+  hissResonance: 128,
+  questionRise: 1.2,
+  stressLift: 2.5,
   vowelPositions: {},
 }
 
@@ -282,15 +349,20 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
     noise: HISS[s].noise * tune.hissLevel,
     band: bandRaw(HISS[s].hz),
     voice: HISS[s].voice,
-    // v and dh buzz through nearly closed lips or teeth: dark, like a stop's closure.
-    ...(s === 'v' || s === 'dh' ? { pos: VOWEL_POS.uw } : {}),
+    // v buzzes through nearly closed lips: dark, like a stop's closure. dh at the teeth: dark it
+    // sounded like a glottal stop or an l before ee and i ("this" as "gliss").
+    ...(s === 'v' ? { pos: VOWEL_POS.uw } : s === 'dh' ? { locus: { place: 'teeth' as const, side: 'next' as const } } : {}),
   })
   const out: Segment[] = []
   const seg = (sound: string, ms: number, s: Partial<Segment> = {}) =>
-    out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, control: 0, vowel: false, ...s })
+    out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, shape: null, control: 0, vowel: false, ...s })
   const sounds = pronounce(text, dictionary)
+  const words = wordsOf(text)
+  let word = 0
   for (const [n, { sound: s, stressed }] of sounds.entries()) {
+    const accent = stressed && !FUNCTION_WORDS.has(words[word])
     if (s === '') {
+      word++
       // No pause before an h: silence and then a puff of noise is how a k sounds ("the whole" as
       // "thu-k-ole").
       if (sounds[n + 1]?.sound !== 'h') seg('', tune.gapMs)
@@ -300,7 +372,6 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
         seg(s, lengthOf(s), { pos: s === 'r' ? tune.rPosition : posOf(s), voice: 100, shape: s })
         continue
       }
-      const pitch = stressed ? 1.5 : 0
       const ms = lengthOf(s, stressed)
       // A diphthong has time on both ends, a little more where it glides to: either is easily lost.
       const control = (v: string) => tune.vowelControls[v] ?? 0
@@ -308,10 +379,10 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
       if (s === 'ey')
         // Its own narrow glide, mostly on the start (waves: those of eh and ih).
         (['eh', 'ih'] as const).forEach((v, i) =>
-          seg(v, ms * (i ? 0.4 : 0.6), { pos: i ? tune.eyEnd : tune.eyStart, voice: voice(v), pitch, shape: v, control: control(v), vowel: true }),
+          seg(v, ms * (i ? 0.4 : 0.6), { pos: i ? tune.eyEnd : tune.eyStart, voice: voice(v), shape: v, control: control(v), vowel: true, accent }),
         )
-      else if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: posOf(v), voice: voice(v), pitch, shape: v, control: control(v), vowel: true }))
-      else seg(s, ms, { pos: posOf(s), voice: voice(s), pitch, shape: s, control: control(s), vowel: true })
+      else if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: posOf(v), voice: voice(v), shape: v, control: control(v), vowel: true, accent }))
+      else seg(s, ms, { pos: posOf(s), voice: voice(s), shape: s, control: control(s), vowel: true, accent })
     } else if (s === 'm' || s === 'n' || s === 'ng') {
       // A dark murmur, its edges where the vowels next to it start and end (m, n and ng differ there).
       const ms = lengthOf(s)
@@ -471,6 +542,10 @@ function waveList(segments: Segment[], levels: (number[] | null)[], f0: number) 
 /** The Init patch turned into a patch that says `text` on each note; null if there's nothing to say. */
 export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, tuning }: SpeechPatchOptions = {}): SpeechPatch | null {
   const tune = { ...TUNING, ...tuning }
+  // A yes/no question (ending in ?, starting with are, is, do, can, ...) rises at its end;
+  // statements and wh-questions (how, what, ...) fall.
+  const first = wordsOf(text)[0]
+  const yesNo = text.trim().endsWith('?') && !WH_WORDS.has(first ?? '')
   const all = segmentsOf(text, dictionary, tune)
   // More segments than steps: say less (the end goes).
   const segments = all.slice(0, STEPS - 1)
@@ -499,8 +574,8 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   p.set('filter1keytrack', 512)
   p.set('filter1cutoff', 512)
   p.set('filter2type', 0)
-  p.set('filter2morph', 512)
-  p.set('filter2resonance', 384)
+  p.set('filter2morph', tune.hissMorph)
+  p.set('filter2resonance', tune.hissResonance)
   p.set('filter2keytrack', 512)
   p.set('filter2cutoff', 512)
   // The Amp's envelope opens at once and holds while the key is down; the phrase itself ends silent.
@@ -517,6 +592,7 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
 
   // The five curves, one value per segment, then a silent hold.
   const total = t.counts.reduce((a, b) => a + b, 0)
+  const pitchAt = melody(segments, t.counts, yesNo, tune)
   // The vowel order that lets this phrase glide where it should; positions move into it.
   const keys = segments.map((s) => String(s.pos))
   const order = chooseOrder(
@@ -555,7 +631,7 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
         // at most: a longer ramp would play the slots between, other sounds' waves.
         { target: 13, depth: 1024, value: (s) => ((list.slotOf.get(s.shape ?? '') ?? 0) * 64) / 7, glideMs: Math.min(tune.vowelGlideMs, t.stepMs), end: ((list.slotOf.get(segments.at(-1)!.shape ?? '') ?? 0) * 64) / 7 }
       : // Osc 1 Pitch: stress, and the phrase falling by 2 semitones.
-        { target: 11, depth: 1024, value: (s, at) => (s.pitch + 1 - (3 * at) / total) * PER_SEMITONE, glideMs: tune.pitchGlideMs, end: -2 * PER_SEMITONE },
+        { target: 11, depth: 1024, value: (_, at) => pitchAt(at) * PER_SEMITONE, glideMs: tune.pitchGlideMs, end: pitchAt(total) * PER_SEMITONE },
   ]
   curves.forEach((c, i) => {
     const lfo = `lfo${i + 1}`
@@ -611,21 +687,32 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
       const w = list.waves[slot - 1]
       p.set(`osc1wavscanwave${slot}`, w === undefined ? (slot === 1 ? 3 : 0) : slot === 1 ? w : w + 2)
     }
-    // The phrase falls 2 semitones on ENV 3 instead: full envelope at depth +20 (of 128) is 2 semitones.
-    const fall = 2
+    // The phrase's pitch on ENV 3 instead (a full envelope at depth d of 128 is d * 64/128 / 5
+    // semitones). A statement falls 2 semitones over its Decay (which takes ~2x the time shown); a
+    // question rises by questionRise over an Attack as long as the phrase (shown time; curve Exp
+    // -48: flat, then up toward the end; tools/calibrateSpeech.ts envattack). The Speed macro shortens it as it
+    // speeds the phrase up (the time table goes ~x1.7 per 64 raw, like the LFO rates).
+    const phraseMs = total * t.stepMs
+    const nearest = (ms: number) => DECAYS.reduce((a, b) => (Math.abs(b[1] - ms) < Math.abs(a[1] - ms) ? b : a))[0]
     p.set('env3bpmsync', 0)
-    p.set('env3attacksyncoff', 0)
     p.set('env3holdsyncoff', 0)
-    p.set('env3sustain', 0)
-    const decayMs = (total * t.stepMs) / CALIBRATION.decayFactor
-    const decay = DECAYS.reduce((a, b) => (Math.abs(b[1] - decayMs) < Math.abs(a[1] - decayMs) ? b : a))[0]
-    // The Speed macro shortens the fall as it speeds the phrase up (both tables ~x1.7 per 64 raw).
-    p.set('env3decaysyncoff', Math.min(1024, decay + SPEED_CENTER))
-    p.set('macro1target6', 131) // Env 3 Decay
+    if (yesNo) {
+      p.set('env3attacksyncoff', Math.min(1024, nearest(phraseMs) + SPEED_CENTER))
+      p.set('env3atkcurve', 16)
+      p.set('env3decaysyncoff', 0)
+      p.set('env3sustain', 1024)
+      p.set('macro1target6', 129) // Env 3 Attack
+    } else {
+      p.set('env3attacksyncoff', 0)
+      p.set('env3sustain', 0)
+      p.set('env3decaysyncoff', Math.min(1024, nearest(phraseMs / CALIBRATION.decayFactor) + SPEED_CENTER))
+      p.set('macro1target6', 131) // Env 3 Decay
+    }
     p.set('macro1depth6', 512 - SPEED_DEPTH * 4)
     p.set('modmatrix6modsource', 3) // Env 3
     p.set('modmatrix6modtarget', 11) // Osc 1 Pitch
-    p.set('modmatrix6depth', Math.round(512 + ((fall * PER_SEMITONE * 128) / 64) * 4))
+    const semitones = yesNo ? tune.questionRise : 2
+    p.set('modmatrix6depth', Math.round(512 + ((semitones * PER_SEMITONE * 128) / 64) * 4))
   }
 
   // Macro 1, Speed: every LFO's Rate by the same amount, so they stay together; the knob's middle
