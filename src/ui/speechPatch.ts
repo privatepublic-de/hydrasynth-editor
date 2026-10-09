@@ -128,10 +128,31 @@ export interface Tuning {
   vibratoRate: number
   /** Voice Analog Feel (raw 0..127): slow random drift of pitch. */
   drift: number
+  /** Lengths, times eSpeak's (and tempo): stressed and unstressed vowels, stops, hisses (and h), m n ng l r w y. */
+  stressedLength: number
+  unstressedLength: number
+  stopLength: number
+  hissLength: number
+  sonorantLength: number
+  /** Silence between words (ms), and how much longer (ms) a vowel rings on before a voiceless hiss. */
+  gapMs: number
+  hissDelayMs: number
+  /** Noise level (0..128) of a voiceless stop's burst (p t k) and of a voiced one's (b d g). */
+  burst: number
+  voicedBurst: number
+  /** Voice level (0..128) through a voiced stop's closure. */
+  closureVoice: number
+  /** All hisses' noise levels times this; and h's noise level (0..128). */
+  hissLevel: number
+  breath: number
+  /** Filter 1 Cutoff (raw) of r: close to the vowels around it, it melts into them. */
+  rPosition: number
 }
 /**
  * Chosen by ear from tools/tuneSpeech.ts runs: longer vowel glides scored smoother still (160 ms:
- * 10 % of frames still against 40 % before), but blur the vowels; 70 ms sounded better.
+ * 10 % of frames still against 40 % before), but blur the vowels; 70 ms sounded better. Longer
+ * m n l r w y, stops, word gaps and hiss delays scored closer to the references and sounded
+ * better; shorter vowels scored better only by holding still less. r by ear between I and O.
  */
 export const TUNING: Tuning = {
   tempo: 1.4,
@@ -142,23 +163,47 @@ export const TUNING: Tuning = {
   vibrato: 0,
   vibratoRate: 100,
   drift: 60,
+  stressedLength: 1,
+  unstressedLength: 1,
+  stopLength: 1.2,
+  hissLength: 1,
+  sonorantLength: 1.4,
+  gapMs: 80,
+  hissDelayMs: 60,
+  burst: 85,
+  voicedBurst: 45,
+  closureVoice: 45,
+  hissLevel: 1,
+  breath: 55,
+  rPosition: between(I, O, 0.5),
 }
 
-function segmentsOf(text: string, dictionary: Pronunciations | null | undefined, tempo: number): Segment[] {
+function segmentsOf(text: string, dictionary: Pronunciations | null | undefined, tune: Tuning): Segment[] {
   const lengthOf = (sound: string, stressed = false) => {
     const l = LENGTHS[sound] ?? 60
-    return tempo * (typeof l === 'number' ? l : l[stressed ? 1 : 0])
+    const factor =
+      typeof l !== 'number'
+        ? stressed
+          ? tune.stressedLength
+          : tune.unstressedLength
+        : sound in STOP
+          ? tune.stopLength
+          : sound in HISS || sound === 'h'
+            ? tune.hissLength
+            : tune.sonorantLength
+    return tune.tempo * factor * (typeof l === 'number' ? l : l[stressed ? 1 : 0])
   }
+  const hiss = (s: string) => ({ noise: HISS[s].noise * tune.hissLevel, band: bandRaw(HISS[s].hz), voice: HISS[s].voice })
   const out: Segment[] = []
   const seg = (sound: string, ms: number, s: Partial<Segment> = {}) =>
     out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, ...s })
   for (const { sound: s, stressed } of pronounce(text, dictionary)) {
     if (s === '') {
-      seg('', 50)
+      seg('', tune.gapMs)
     } else if (s in DIPHTHONGS || s in VOWEL_POS) {
       const glide = ['w', 'y', 'r', 'l'].includes(s)
       if (glide) {
-        seg(s, lengthOf(s), { pos: VOWEL_POS[s], voice: 100, shape: s })
+        seg(s, lengthOf(s), { pos: s === 'r' ? tune.rPosition : VOWEL_POS[s], voice: 100, shape: s })
         continue
       }
       const pitch = stressed ? 1.5 : 0
@@ -169,26 +214,25 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
     } else if (s === 'm' || s === 'n' || s === 'ng') {
       seg(s, lengthOf(s), { pos: VOWEL_POS.uw, voice: 70, shape: s })
     } else if (s === 'h') {
-      seg(s, lengthOf(s), { noise: 55, band: bandRaw(1500) })
+      seg(s, lengthOf(s), { noise: tune.breath, band: bandRaw(1500) })
     } else if (s in HISS) {
-      const h = HISS[s]
-      seg(s, lengthOf(s), { noise: h.noise, band: bandRaw(h.hz), voice: h.voice })
+      seg(s, lengthOf(s), hiss(s))
     } else if (s in STOP) {
       const st = STOP[s]
       const ms = lengthOf(s)
       // Voiced stops murmur on through the closure, dark with the mouth shut, and release softly into
       // the vowel; voiceless ones go quiet, then pop. Affricates end in their hiss.
       const [closure, burst] = st.then ? [0.4, 0.15] : [0.7, 0.3]
-      seg(s, ms * closure, st.voiced ? { voice: 45, pos: VOWEL_POS.uw } : {})
-      seg(s, Math.max(15, ms * burst), { noise: st.voiced ? 45 : 85, band: bandRaw(st.hz), voice: st.voiced ? 80 : 0 })
-      if (st.then) seg(st.then, ms * 0.45, { noise: HISS[st.then].noise, band: bandRaw(HISS[st.then].hz), voice: HISS[st.then].voice })
+      seg(s, ms * closure, st.voiced ? { voice: tune.closureVoice, pos: VOWEL_POS.uw } : {})
+      seg(s, Math.max(15, ms * burst), { noise: st.voiced ? tune.voicedBurst : tune.burst, band: bandRaw(st.hz), voice: st.voiced ? 80 : 0 })
+      if (st.then) seg(st.then, ms * 0.45, hiss(st.then))
     }
   }
   // Nothing sounds before the first or after the last voiced or hissed segment.
   while (out.length && out[0].sound === '') out.shift()
   while (out.length && out.at(-1)!.sound === '') out.pop()
   // A voiceless hiss after a vowel starts a little late: the vowel rings on into it.
-  for (let i = 1; i < out.length; i++) if (out[i].noise && !out[i].voice && out[i].sound in HISS && out[i - 1].voice === 128) out[i - 1].ms += 40
+  for (let i = 1; i < out.length; i++) if (out[i].noise && !out[i].voice && out[i].sound in HISS && out[i - 1].voice === 128) out[i - 1].ms += tune.hissDelayMs
   // A phrase-final vowel lasts longer.
   const lastVowel = out.map((s) => s.voice).lastIndexOf(128)
   if (lastVowel >= 0) out[lastVowel].ms *= 1.3
@@ -281,7 +325,7 @@ function waveList(segments: Segment[], levels: (number[] | null)[], f0: number) 
 /** The Init patch turned into a patch that says `text` on each note; null if there's nothing to say. */
 export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, tuning }: SpeechPatchOptions = {}): SpeechPatch | null {
   const tune = { ...TUNING, ...tuning }
-  const all = segmentsOf(text, dictionary, tune.tempo)
+  const all = segmentsOf(text, dictionary, tune)
   // More segments than steps: say less (the end goes).
   const segments = all.slice(0, STEPS - 1)
   const dropped = all.length - segments.length

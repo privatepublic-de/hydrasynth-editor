@@ -2,7 +2,7 @@
 // a few test phrases (tools/synthTake.ts, H128's working memory only), recorded, and scored
 // against reference speech (tools/speechScore.ts); one setting at a time, the best value is kept
 // (coordinate descent), for `passes` rounds. Every evaluation goes to local/tune/log.jsonl.
-// Usage: npx vite-node tools/tuneSpeech.ts [passes] [saw]
+// Usage: npx vite-node tools/tuneSpeech.ts [passes] [saw|waves] [setting,setting,...]  (default: all settings)
 import { appendFileSync, copyFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { buildSpeechPatch, TUNING, type Tuning } from '../src/ui/speechPatch'
 import { harmonicLevels, parsePronunciations } from '../src/ui/waveSpeech'
@@ -11,6 +11,19 @@ import { openSynth } from './synthTake'
 
 const PHRASES = ['robot voice', 'hello world', 'make some noise', 'how are you', 'good morning']
 const CANDIDATES: { [K in keyof Tuning]: number[] } = {
+  stressedLength: [0.8, 0.9, 1.1, 1.25],
+  unstressedLength: [0.8, 0.9, 1.1, 1.25],
+  stopLength: [0.7, 0.85, 1.2, 1.4],
+  hissLength: [0.7, 0.85, 1.2, 1.4],
+  sonorantLength: [0.7, 0.85, 1.2, 1.4],
+  gapMs: [0, 25, 80],
+  hissDelayMs: [0, 20, 60],
+  burst: [50, 70, 100, 120],
+  voicedBurst: [20, 35, 60, 80],
+  closureVoice: [20, 35, 60, 80],
+  hissLevel: [0.6, 0.8, 1.15],
+  breath: [30, 45, 70],
+  rPosition: [640, 896, 1024],
   vowelGlideMs: [20, 40, 70, 110, 160],
   voiceGlideMs: [10, 22, 40, 70],
   pitchGlideMs: [30, 60, 120, 200],
@@ -25,6 +38,8 @@ const FILE = `${DIR}/take.wav`
 
 const passes = Number(process.argv[2] ?? 1)
 const withWaves = process.argv[3] !== 'saw'
+const keys = (process.argv[4]?.split(',') ?? Object.keys(CANDIDATES)) as (keyof Tuning)[]
+for (const k of keys) if (!(k in CANDIDATES)) throw new Error(`No setting ${k}`)
 mkdirSync(DIR, { recursive: true })
 const dictionary = parsePronunciations(readFileSync('public/pronunciations.txt', 'utf8'))
 const levels = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves.map((w: { cycle: string }) =>
@@ -62,12 +77,13 @@ try {
   let bestCost = (first.cost + again.cost) / 2
   console.log(`start ${show(first)}; again ${show(again)}`)
   for (let pass = 1; pass <= passes; pass++) {
-    for (const key of Object.keys(CANDIDATES) as (keyof Tuning)[]) {
+    for (const key of keys) {
       for (const value of CANDIDATES[key]) {
         if (value === best[key]) continue
         const tuning = { ...best, [key]: value }
         const r = await evaluate(tuning)
-        const better = r.cost < bestCost
+        // Better by more than two takes of the same tuning differ (~0.01): not just luck.
+        const better = r.cost < bestCost - 0.01
         console.log(`pass ${pass} ${key} = ${value}: ${show(r)}${better ? '  <- best' : ''}`)
         if (better) {
           best = tuning
