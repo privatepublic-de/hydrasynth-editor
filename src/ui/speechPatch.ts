@@ -32,8 +32,11 @@ export const CALIBRATION = {
   perSemitone: 5,
   /** An envelope's Decay from full to 0 takes about twice the time it shows (envpitch). */
   decayFactor: 2,
-  /** LFO Smooth glides each step change in about 7.5 ms per unit (smooth). */
-  smoothMsPerUnit: 7.5,
+  /**
+   * LFO Smooth glides each step change over smooth/127 of a step (smooth: 18 -> 30 ms at 4 steps a
+   * second, 115 ms at one): at most one step, so longer glides are ramps written into the steps.
+   */
+  smoothShareOfStep: true,
   /** Steps 9-64 only play when the patch carries this marker at byte 1766 (factory patches do, Init doesn't). */
   extendedMarker: { offset: 1766, text: 'ETCD' },
 }
@@ -96,7 +99,7 @@ interface Segment {
 /**
  * How long eSpeak NG says each sound (ms; tools/espeak.ts durations, over 3,500 words of the
  * CMU dictionary), vowels as [unstressed, stressed]. The synth needs longer than eSpeak to be
- * understood, so all of it is stretched by TEMPO (set by ear: "voice" ~0.6 s).
+ * understood, so all of it is stretched by the tuning's tempo (set by ear: "voice" ~0.6 s at 1.4).
  */
 const LENGTHS: Record<string, number | [number, number]> = {
   aa: [81, 152], ae: [76, 152], ah: [54, 134], ao: [73, 133], aw: [104, 188], ay: [89, 169], eh: [83, 148], er: [93, 171],
@@ -104,13 +107,48 @@ const LENGTHS: Record<string, number | [number, number]> = {
   b: 41, ch: 70, d: 48, dh: 60, f: 79, g: 48, h: 60, jh: 63, k: 51, l: 56, m: 88, n: 83, ng: 98, p: 43, r: 71, s: 80,
   sh: 94, t: 46, th: 83, v: 69, w: 105, y: 84, z: 87, zh: 64,
 }
-const TEMPO = 1.4
-const lengthOf = (sound: string, stressed = false) => {
-  const l = LENGTHS[sound] ?? 60
-  return TEMPO * (typeof l === 'number' ? l : l[stressed ? 1 : 0])
+/**
+ * What tools/tuneSpeech.ts adjusts, against recordings of the synth scored by tools/speechScore.ts:
+ * how long sounds last, how fast the curves glide between steps (a curve that holds still between
+ * jumps sounds choppy), and the slight unsteadiness of a real voice.
+ */
+export interface Tuning {
+  /** All sound lengths times this. */
+  tempo: number
+  /** Glide (ms) of the vowel (Filter 1 Cutoff) and wave (WaveScan) curves between steps. */
+  vowelGlideMs: number
+  /** Glide (ms) of the voicing (Osc 1 Vol) curve. */
+  voiceGlideMs: number
+  /** Glide (ms) of the hiss curves (Noise Vol, Filter 2 Cutoff). */
+  noiseGlideMs: number
+  /** Glide (ms) of the pitch curve. */
+  pitchGlideMs: number
+  /** Voice vibrato amount (raw 0..120) and rate (raw 0..127). */
+  vibrato: number
+  vibratoRate: number
+  /** Voice Analog Feel (raw 0..127): slow random drift of pitch. */
+  drift: number
+}
+/**
+ * Chosen by ear from tools/tuneSpeech.ts runs: longer vowel glides scored smoother still (160 ms:
+ * 10 % of frames still against 40 % before), but blur the vowels; 70 ms sounded better.
+ */
+export const TUNING: Tuning = {
+  tempo: 1.4,
+  vowelGlideMs: 70,
+  voiceGlideMs: 40,
+  noiseGlideMs: 0,
+  pitchGlideMs: 120,
+  vibrato: 0,
+  vibratoRate: 100,
+  drift: 60,
 }
 
-function segmentsOf(text: string, dictionary?: Pronunciations | null): Segment[] {
+function segmentsOf(text: string, dictionary: Pronunciations | null | undefined, tempo: number): Segment[] {
+  const lengthOf = (sound: string, stressed = false) => {
+    const l = LENGTHS[sound] ?? 60
+    return tempo * (typeof l === 'number' ? l : l[stressed ? 1 : 0])
+  }
   const out: Segment[] = []
   const seg = (sound: string, ms: number, s: Partial<Segment> = {}) =>
     out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, ...s })
@@ -202,6 +240,8 @@ export interface SpeechPatchOptions {
   waves?: { levels: (number[] | null)[]; f0: number }
   /** How words are said (loadPronunciations); without it, or for words it lacks, the spelling rules. */
   dictionary?: Pronunciations | null
+  /** Overrides of TUNING. */
+  tuning?: Partial<Tuning>
 }
 
 /** Envelope times (raw -> ms) the synth offers, read from its own display table. */
@@ -239,8 +279,9 @@ function waveList(segments: Segment[], levels: (number[] | null)[], f0: number) 
 }
 
 /** The Init patch turned into a patch that says `text` on each note; null if there's nothing to say. */
-export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary }: SpeechPatchOptions = {}): SpeechPatch | null {
-  const all = segmentsOf(text, dictionary)
+export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, tuning }: SpeechPatchOptions = {}): SpeechPatch | null {
+  const tune = { ...TUNING, ...tuning }
+  const all = segmentsOf(text, dictionary, tune.tempo)
   // More segments than steps: say less (the end goes).
   const segments = all.slice(0, STEPS - 1)
   const dropped = all.length - segments.length
@@ -279,22 +320,30 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary }:
   p.set('env2sustain', 1024)
   p.set('env2releasesyncoff', 320)
   p.set('amplevel', 768)
+  p.set('voicevibratobpmsync', 0)
+  p.set('voicevibratoamount', tune.vibrato)
+  p.set('voicevibratoratesyncoff', tune.vibratoRate)
+  p.set('voiceanalogfeel', tune.drift)
 
   // The five curves, one value per segment, then a silent hold.
   const total = t.counts.reduce((a, b) => a + b, 0)
   const list = waves ? waveList(segments, waves.levels, waves.f0) : null
-  /** Smooth for a glide of `ms` between steps (formants move in ~40 ms, pitch a little slower). */
-  const glide = (ms: number) => Math.round(ms / CALIBRATION.smoothMsPerUnit)
-  const curves: { target: number; depth: number; value: (s: Segment, at: number) => number; smooth: number; end: number }[] = [
-    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, smooth: glide(40), end: 0 }, // Filt 1 Cutoff
-    { target: 73, depth: 1024, value: (s) => s.voice / 2, smooth: glide(22), end: 0 }, // Osc 1 Vol
-    { target: 77, depth: 1024, value: (s) => s.noise / 2, smooth: 0, end: 0 }, // Noise Vol
-    { target: 96, depth: 768, value: (s) => (s.band - 512) / 8, smooth: 0, end: 0 }, // Filt 2 Cutoff
+  /**
+   * Each curve moves between sounds in a ramp `glideMs` long, written into the steps (a moving
+   * average over that many steps), and glides straight from step to step (Smooth 127): a curve
+   * that holds each sound and then jumps sounds choppy. A glide of 0 jumps.
+   */
+  const curves: { target: number; depth: number; value: (s: Segment, at: number) => number; glideMs: number; end: number }[] = [
+    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0 }, // Filt 1 Cutoff
+    { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0 }, // Osc 1 Vol
+    { target: 77, depth: 1024, value: (s) => s.noise / 2, glideMs: tune.noiseGlideMs, end: 0 }, // Noise Vol
+    { target: 96, depth: 768, value: (s) => (s.band - 512) / 8, glideMs: tune.noiseGlideMs, end: 0 }, // Filt 2 Cutoff
     list
-      ? // Osc 1 WaveScan: the sound's slot (slot i of 8 sits at i/7 of the range).
-        { target: 13, depth: 1024, value: (s) => ((list.slotOf.get(s.shape ?? '') ?? 0) * 64) / 7, smooth: glide(40), end: ((list.slotOf.get(segments.at(-1)!.shape ?? '') ?? 0) * 64) / 7 }
+      ? // Osc 1 WaveScan: the sound's slot (slot i of 8 sits at i/7 of the range). One step's glide
+        // at most: a longer ramp would play the slots between, other sounds' waves.
+        { target: 13, depth: 1024, value: (s) => ((list.slotOf.get(s.shape ?? '') ?? 0) * 64) / 7, glideMs: Math.min(tune.vowelGlideMs, t.stepMs), end: ((list.slotOf.get(segments.at(-1)!.shape ?? '') ?? 0) * 64) / 7 }
       : // Osc 1 Pitch: stress, and the phrase falling by 2 semitones.
-        { target: 11, depth: 1024, value: (s, at) => (s.pitch + 1 - (3 * at) / total) * PER_SEMITONE, smooth: glide(60), end: -2 * PER_SEMITONE },
+        { target: 11, depth: 1024, value: (s, at) => (s.pitch + 1 - (3 * at) / total) * PER_SEMITONE, glideMs: tune.pitchGlideMs, end: -2 * PER_SEMITONE },
   ]
   curves.forEach((c, i) => {
     const lfo = `lfo${i + 1}`
@@ -305,13 +354,24 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary }:
     p.set(`${lfo}oneshot`, 1)
     p.set(`${lfo}trigsync`, 0)
     p.set(`${lfo}level`, 1024)
-    p.set(`${lfo}smooth`, c.smooth)
-    let step = 1
+    p.set(`${lfo}smooth`, c.glideMs > 0 ? 127 : 0)
+    // One value per step, then the end; ramps between sounds over `width` steps (the end stays exact).
+    const values: number[] = []
     segments.forEach((s, n) => {
-      for (let k = 0; k < t.counts[n]; k++, step++) p.set(`${lfo}step${step}`, stepRaw(c.value(s, step - 1)))
+      for (let k = 0; k < t.counts[n]; k++) values.push(c.value(s, values.length))
     })
-    p.set(`${lfo}step${step}`, stepRaw(c.end))
-    for (step++; step <= STEPS; step++) p.set(`${lfo}step${step}`, 512)
+    values.push(c.end)
+    const width = Math.max(1, Math.round(c.glideMs / t.stepMs))
+    const ramped = values.map((_, k) => {
+      if (k === values.length - 1 || width === 1) return values[k]
+      const from = Math.max(0, k - Math.floor((width - 1) / 2))
+      const to = Math.min(values.length - 1, k + Math.ceil((width - 1) / 2))
+      let sum = 0
+      for (let j = from; j <= to; j++) sum += values[j]
+      return sum / (to - from + 1)
+    })
+    ramped.forEach((v, k) => p.set(`${lfo}step${k + 1}`, stepRaw(v)))
+    for (let step = ramped.length + 1; step <= STEPS; step++) p.set(`${lfo}step${step}`, 512)
     p.set(`modmatrix${i + 1}modsource`, 6 + i) // LFO 1..5
     p.set(`modmatrix${i + 1}modtarget`, c.target)
     p.set(`modmatrix${i + 1}depth`, c.depth)

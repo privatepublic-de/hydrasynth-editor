@@ -14,31 +14,17 @@
 //                    through the Vowel filter or not: how often it reads as the right vowel
 // The patches carry the ETCD marker, without which the synth ignores LFO steps 9-64.
 // Usage: npx vite-node tools/calibrateSpeech.ts <experiment> [args]
-import { spawn } from 'node:child_process'
-import { noteOff, noteOn, sleep } from '../src/midi/channel'
 import { formatValue } from '../src/params/display'
 import { initPatchBytes } from '../src/params/initPatch'
-import { encodeNrpn, nrpnBytes } from '../src/params/nrpn'
 import { Patch, param } from '../src/params/patch'
-import { HydrasynthSession } from '../src/sysex/session'
 import { buildSpeechPatch, CALIBRATION, VOWEL_POS } from '../src/ui/speechPatch'
 import { FORMANTS, formantLevels, harmonicLevels, parsePronunciations, similarity, waveFor } from '../src/ui/waveSpeech'
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs'
-import { connectHelper } from './coremidiTransport'
-import { RATE, readWav } from './waveAudio'
+import { openSynth } from './synthTake'
+import { RATE } from './waveAudio'
 
-const CHANNEL = 1
 const FILE = 'local/wave-recordings/calibrate-speech.wav'
 const C2 = 65.406
-
-function record(seconds: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const input = ['-t', 'coreaudio', '-c', '18', '-r', String(RATE), 'default']
-    const rec = spawn('sox', ['-q', ...input, '-c', '2', '-b', '24', FILE, 'remix', '1', '2', 'trim', '0', String(seconds)], { stdio: 'inherit' })
-    rec.on('error', reject)
-    rec.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`sox exited with ${code}`))))
-  })
-}
 
 function initPatch(): Patch {
   const p = new Patch(initPatchBytes())
@@ -59,31 +45,7 @@ function stepLfo(p: Patch, steps: number[], target: number, depth: number, rateR
   p.set('modmatrix1depth', depth)
 }
 
-const transport = await connectHelper()
-const session = new HydrasynthSession(transport, { timeoutMs: 3000 })
-const nrpn = (key: string, value: number) => session.sendRaw(nrpnBytes(CHANNEL, encodeNrpn(param(key), value)!))
-
-/** Plays `patch` with `note` held `holdS`, sending `changes` [s after note-on, key, value]; the recording from note-on. */
-async function take(patch: Patch, note: number, holdS: number, changes: [number, string, number][] = []): Promise<Float64Array> {
-  await session.uploadToRam(7, 127, patch.bytes)
-  await session.reloadSlot(CHANNEL, 7, 127)
-  await sleep(200)
-  const done = record(holdS + 0.9)
-  await sleep(300)
-  const t0 = Date.now()
-  session.sendRaw(noteOn(CHANNEL, note, 100))
-  for (const [at, key, value] of [...changes].sort((a, b) => a[0] - b[0])) {
-    await sleep(Math.max(0, at * 1000 - (Date.now() - t0)))
-    nrpn(key, value)
-  }
-  await sleep(Math.max(0, holdS * 1000 - (Date.now() - t0)))
-  session.sendRaw(noteOff(CHANNEL, note))
-  await done
-  const x = readWav(FILE)
-  let on = 0
-  while (on < x.length && Math.abs(x[on]) < 0.01) on++
-  return x.subarray(on)
-}
+const { take, close } = await openSynth(FILE)
 
 /** Magnitude spectrum (dB) of x[from, from + n) with a Hann window; bin k is k * RATE / n Hz. */
 function spectrum(x: Float64Array, from: number, n = 8192): number[] {
@@ -315,7 +277,11 @@ try {
     for (const smooth of (arg ?? '0,9,18,36,64').split(',').map(Number)) {
       const p = initPatch()
       p.set('osc1type', 0)
-      stepLfo(p, [0, 50, 50], 11, 1024)
+      // RATE_RAW/PER_SECOND: the LFO rate as raw value and steps per second (default 449, 1 Hz);
+      // the pitch steps up at 1 s either way.
+      const rateRaw = Number(process.env.RATE_RAW ?? 449)
+      const perSecond = Number(process.env.PER_SECOND ?? 1)
+      stepLfo(p, [...Array(perSecond).fill(0), ...Array(3 * perSecond).fill(50)], 11, 1024, rateRaw)
       p.set('lfo1smooth', smooth)
       const x = await take(p, 72, 2.2)
       const before = frequency(x, Math.round(0.5 * RATE), 4800)
@@ -354,7 +320,9 @@ try {
         )
       : null
     const dictionary = parsePronunciations(readFileSync('public/pronunciations.txt', 'utf8'))
-    const s = buildSpeechPatch(arg, { dictionary, ...(levels ? { waves: { levels, f0: 130.81 } } : {}) })!
+    // TUNING='{"vowelGlideMs":70}': overrides of the patch's tuning; SUFFIX: added to the file name.
+    const tuning = process.env.TUNING ? JSON.parse(process.env.TUNING) : undefined
+    const s = buildSpeechPatch(arg, { dictionary, tuning, ...(levels ? { waves: { levels, f0: 130.81 } } : {}) })!
     console.log(`${arg}: ${s.sounds.join(' ')}, ${s.ms} ms${withWaves ? `, waves ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => formatValue(param(`osc1wavscanwave${n}`), s.patch.get(`osc1wavscanwave${n}`))).join(', ')}` : ''}`)
     const x = await take(s.patch, 48, s.ms / 1000 + 0.4)
     // What each 20 ms sounds like, against the planned Filter 1 Cutoff of that step.
@@ -366,7 +334,7 @@ try {
       console.log(`${String(t).padStart(4)} ms ${bandBar(x, Math.round((t / 1000) * RATE))} cutoff ${512 + plan(1) * 8} voice ${plan(2) * 2} noise ${plan(3) * 2}`)
     }
     mkdirSync('local/speech-samples', { recursive: true })
-    const out = `local/speech-samples/${arg.replace(/\W+/g, '-')}${withWaves ? '-waves' : '-saw'}.wav`
+    const out = `local/speech-samples/${arg.replace(/\W+/g, '-')}${withWaves ? '-waves' : '-saw'}${process.env.SUFFIX ?? ''}.wav`
     copyFileSync(FILE, out)
     console.log('saved', out)
   } else if (experiment === 'sources') {
@@ -428,8 +396,5 @@ try {
   }
   console.log(`(LFO rate ${formatValue(param('lfo1ratesyncoff'), 449)} Hz per step in these runs)`)
 } finally {
-  session.sendRaw(noteOff(CHANNEL, 36))
-  session.sendRaw(noteOff(CHANNEL, 48))
-  session.dispose()
-  transport.close()
+  close()
 }
