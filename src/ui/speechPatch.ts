@@ -54,13 +54,16 @@ const PER_SEMITONE = CALIBRATION.perSemitone
  * front vowels, uh, r and l where the synth's sweep best matched textbook formants at C2, C3 and
  * C4 alike (tools/calibrateSpeech.ts positions); ee, the o of hot, oo and er moved where their
  * steady middle came closest to reference speech (tools/tuneSpeech.ts vowels) and sounded better;
- * the rest by ear. The a of cat isn't right anywhere on this sweep.
+ * the rest by ear. The a of cat isn't right anywhere on this sweep (it gets Formant Control +64,
+ * TUNING vowelControls). er, by ear, toward a non-rhotic "ö"-like vowel: a little darker, with
+ * Formant Control +64 (which lifts F1 to ~458 Hz and the harsh ~3.5 kHz peak out of the way) and
+ * quieter; the filter can't make the American er's low F3 anyway.
  */
 const { A, E, I, O, U } = CALIBRATION.vowelAt
 const between = (a: number, b: number, t: number) => Math.round(a + (b - a) * t)
 export const VOWEL_POS: Record<string, number> = {
   aa: between(A, E, 0.25), ah: between(A, E, 0.19), ae: between(A, E, 0.5), eh: between(A, E, 0.625), ih: E, iy: between(I, O, 0.125),
-  er: between(I, O, 0.67), ao: between(I, O, 0.9), ow: between(O, U, 0.09), uh: between(I, O, 0.875), uw: between(O, U, 0.75),
+  er: between(I, O, 0.75), ao: between(I, O, 0.9), ow: between(O, U, 0.09), uh: between(I, O, 0.875), uw: between(O, U, 0.75),
   w: U, y: between(I, E, 0.375), r: between(I, O, 0.875), l: between(I, O, 0.875),
 }
 const DIPHTHONGS: Record<string, [string, string]> = { ey: ['eh', 'iy'], ay: ['aa', 'iy'], aw: ['aa', 'uw'], ow: ['ow', 'uw'], oy: ['ao', 'iy'] }
@@ -102,6 +105,8 @@ interface Segment {
   shape: string | null
   /** Formant Control above its 64 (raw), for vowels the sweep can't make at 64 (the a of cat). */
   control: number
+  /** A vowel (or half of a diphthong). */
+  vowel: boolean
 }
 
 /**
@@ -155,13 +160,16 @@ export interface Tuning {
   breath: number
   /** Filter 1 Cutoff (raw) of r: close to the vowels around it, it melts into them. */
   rPosition: number
-  /**
-   * Formant Control raised (raw, over 512) for the a of cat: on its place between A and E it is
-   * too low (F1 589, F2 1635 Hz); +64 raises both to ~654 / 1830 (tools/calibrateSpeech.ts control).
-   */
-  aeControl: number
   /** Filter 1 Cutoff (raw) per vowel, where it differs from VOWEL_POS. */
   vowelPositions: Partial<Record<string, number>>
+  /**
+   * Formant Control moved (raw, from 512) per vowel. The a of cat: on its place between A and E it
+   * is too low (F1 589, F2 1635 Hz); +64 raises both to ~654 / 1830 (tools/calibrateSpeech.ts
+   * control). er: +64 makes it mellower (see VOWEL_POS).
+   */
+  vowelControls: Partial<Record<string, number>>
+  /** Voice level (0..128) per vowel, where it isn't the full 128. */
+  vowelLevels: Partial<Record<string, number>>
 }
 /**
  * Chosen by ear from tools/tuneSpeech.ts runs: longer vowel glides scored smoother still (160 ms:
@@ -191,7 +199,8 @@ export const TUNING: Tuning = {
   hissLevel: 1,
   breath: 55,
   rPosition: between(I, O, 0.5),
-  aeControl: 64,
+  vowelControls: { ae: 64, er: 64 },
+  vowelLevels: { er: 96 },
   vowelPositions: {},
 }
 
@@ -220,7 +229,7 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
   })
   const out: Segment[] = []
   const seg = (sound: string, ms: number, s: Partial<Segment> = {}) =>
-    out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, control: 0, ...s })
+    out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, control: 0, vowel: false, ...s })
   const sounds = pronounce(text, dictionary)
   for (const [n, { sound: s, stressed }] of sounds.entries()) {
     if (s === '') {
@@ -236,9 +245,10 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
       const pitch = stressed ? 1.5 : 0
       const ms = lengthOf(s, stressed)
       // A diphthong has time on both ends, a little more where it glides to: either is easily lost.
-      const control = (v: string) => (v === 'ae' ? tune.aeControl : 0)
-      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: posOf(v), voice: 128, pitch, shape: v, control: control(v) }))
-      else seg(s, ms, { pos: posOf(s), voice: 128, pitch, shape: s, control: control(s) })
+      const control = (v: string) => tune.vowelControls[v] ?? 0
+      const voice = (v: string) => tune.vowelLevels[v] ?? 128
+      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: posOf(v), voice: voice(v), pitch, shape: v, control: control(v), vowel: true }))
+      else seg(s, ms, { pos: posOf(s), voice: voice(s), pitch, shape: s, control: control(s), vowel: true })
     } else if (s === 'm' || s === 'n' || s === 'ng') {
       seg(s, lengthOf(s), { pos: VOWEL_POS.uw, voice: 70, shape: s })
     } else if (s === 'h') {
@@ -269,9 +279,9 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
   while (out.length && out[0].sound === '') out.shift()
   while (out.length && out.at(-1)!.sound === '') out.pop()
   // A voiceless hiss after a vowel starts a little late: the vowel rings on into it.
-  for (let i = 1; i < out.length; i++) if (out[i].noise && !out[i].voice && out[i].sound in HISS && out[i - 1].voice === 128) out[i - 1].ms += tune.hissDelayMs
+  for (let i = 1; i < out.length; i++) if (out[i].noise && !out[i].voice && out[i].sound in HISS && out[i - 1].vowel) out[i - 1].ms += tune.hissDelayMs
   // A phrase's last vowel lasts longer, stressed or not ("very": its ee was gone in the glides).
-  const lastVowel = out.map((s) => s.voice).lastIndexOf(128)
+  const lastVowel = out.map((s) => s.vowel).lastIndexOf(true)
   if (lastVowel >= 0) out[lastVowel].ms = Math.max(out[lastVowel].ms, lengthOf(out[lastVowel].sound, true)) * 1.3
   // Consonants take the formants of the vowel after them (or before, at the end).
   let next = VOWEL_POS.ah
@@ -411,11 +421,12 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   // The five curves, one value per segment, then a silent hold.
   const total = t.counts.reduce((a, b) => a + b, 0)
   // The vowel order that lets this phrase glide where it should; positions move into it.
+  const keys = segments.map((s) => String(s.pos))
   const order = chooseOrder(
-    segments.map((s) => s.pos!),
-    segments.map((s) => s.voice >= 100),
+    keys,
+    segments.map((s) => s.vowel || s.voice >= 100),
   )
-  for (const s of segments) s.pos = order.place.get(s.pos!)!
+  segments.forEach((s, i) => (s.pos = order.place.get(keys[i])!))
   p.set('filter1vowelorder', ORDERS.indexOf(order.name))
   const list = waves ? waveList(segments, waves.levels, waves.f0) : null
   /**
@@ -619,28 +630,29 @@ const like = (a: number[], b: number[]) => {
 }
 
 /**
- * The vowel order for a phrase whose Filter 1 Cutoffs (in AEIOU, where VOWEL_POS is tuned) are
- * `positions`: in each order every position moves to the point that sounds most like it (an order
+ * The vowel order for a phrase whose sounds are at `places`: Filter 1 Cutoffs in AEIOU (where
+ * VOWEL_POS is tuned). In each order every one goes to the point that sounds most like it (an order
  * where one matches under 0.6 is out). Each order costs a point per glide between `vocal`
  * neighbours (vowels, l r w y) that must jump, plus 1.5 x (1 - match) per vocal sound it moves
  * off its tuned sound; the cheapest wins, AEIOU when it ties, so phrases that glide fine keep
  * their tuned sound exactly. Changes into or out of consonants don't count: their places (v's
  * dark U, say) are tricks, not glides anyone hears.
  */
-export function chooseOrder(positions: number[], vocal: boolean[], debug = false): { name: string; place: Map<number, number> } {
-  const distinct = [...new Set(positions)]
-  let best: { name: string; place: Map<number, number>; cost: number } | null = null
+export function chooseOrder(places: string[], vocal: boolean[]): { name: string; place: Map<string, number> } {
+  const distinct = [...new Set(places)]
+  let best: { name: string; place: Map<string, number>; cost: number } | null = null
   for (const name of ORDERS) {
-    const place = new Map<number, number>()
-    const match = new Map<number, number>()
+    const place = new Map<string, number>()
+    const match = new Map<string, number>()
     let ok = true
-    for (const c of distinct) {
-      if (name === 'AEIOU') {
-        place.set(c, c)
-        match.set(c, 1)
+    for (const key of distinct) {
+      const exact = exactCutoff(name, key)
+      if (exact !== null) {
+        place.set(key, exact)
+        match.set(key, 1)
         continue
       }
-      const target = shapeAt('AEIOU', c)
+      const target = shapeOf(key)
       let at = 0
       let closest = -2
       for (let x = 0; x <= 1024; x += 32) {
@@ -648,23 +660,29 @@ export function chooseOrder(positions: number[], vocal: boolean[], debug = false
         if (l > closest) [closest, at] = [l, x]
       }
       if (closest < 0.6) ok = false
-      place.set(c, at)
-      match.set(c, closest)
+      place.set(key, at)
+      match.set(key, closest)
     }
-    if (debug) console.log(name, ok ? '' : '(out)', distinct.map((c) => `${c}->${place.get(c)}`).join(' '))
     if (!ok) continue
     let cost = 0
-    for (const c of new Set(positions.filter((_, i) => vocal[i]))) cost += 1.5 * (1 - match.get(c)!)
-    for (let i = 1; i < positions.length; i++) {
+    for (const key of new Set(places.filter((_, i) => vocal[i]))) cost += 1.5 * (1 - match.get(key)!)
+    for (let i = 1; i < places.length; i++) {
       if (!vocal[i - 1] || !vocal[i]) continue
-      const [a, b] = [place.get(positions[i - 1])!, place.get(positions[i])!]
+      const [a, b] = [place.get(places[i - 1])!, place.get(places[i])!]
       if (a !== b && offPath(name, a, b)) cost++
     }
-    if (debug) console.log('  cost', cost.toFixed(2))
     if (!best || cost < best.cost - 1e-9) best = { name, place, cost }
   }
   return best!
 }
+
+/** The Cutoff of `key` in `order` if it stays as tuned there (AEIOU); else null. */
+function exactCutoff(order: string, key: string): number | null {
+  return order === 'AEIOU' ? Number(key) : null
+}
+
+/** The filter's measured sound at AEIOU Cutoff `key`. */
+const shapeOf = (key: string) => shapeAt('AEIOU', Number(key))
 
 /** A step value (-64..64) as stored. */
 const stepRaw = (v: number) => Math.round(512 + Math.max(-64, Math.min(64, v)) * 8)

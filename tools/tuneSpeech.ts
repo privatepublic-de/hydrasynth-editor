@@ -28,7 +28,6 @@ const CANDIDATES: Numeric = {
   hissLevel: [0.6, 0.8, 1.15],
   breath: [30, 45, 70],
   rPosition: [640, 896, 1024],
-  aeControl: [0, 32, 96],
   vowelGlideMs: [20, 40, 70, 110, 160],
   voiceGlideMs: [10, 22, 40, 70],
   pitchGlideMs: [30, 60, 120, 200],

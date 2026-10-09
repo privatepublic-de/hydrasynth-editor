@@ -8,7 +8,8 @@
 //   pitch            Step LFO on Osc 1 Pitch at depth 128: semitones per step unit
 //   envpitch         ENV 3 (decaying from full) on Osc 1 Pitch at depth 32: semitones at full envelope
 //   control          Saw through the Vowel filter at Cutoffs 0..192 (A to between A and E) and Formant
-//                    Controls 384..896: formant peaks per pair, to find the a of cat (F1 ~680, F2 ~1800)
+//                    Controls 384..896: formant peaks per pair, to find the a of cat (F1 ~680, F2 ~1800);
+//                    env CUTOFFS / CONTROLS for other ranges, ORDER for another Vowel Order
 //   controlroute     a Step LFO on Filt 1 Control (depth 128) at A: steps 0, 16, 32, 64, one second each
 //   macrorate        Macro 1 on LFO 1 Rate (depth 32) at knob 0, 64 and 128: how fast a step LFO
 //                    then runs (a Sine stepped up and down in pitch), from steps per second
@@ -234,11 +235,13 @@ try {
       console.log(`${t.toFixed(2)} s: ${f.toFixed(2)} Hz, ${(12 * Math.log2(f / 130.81)).toFixed(2)} semitones`)
     }
   } else if (experiment === 'control') {
-    const cutoffs = [0, 64, 128, 192]
-    const controls = [384, 512, 640, 768, 896]
+    // CUTOFFS / CONTROLS: comma lists to measure instead (raw).
+    const cutoffs = process.env.CUTOFFS?.split(',').map(Number) ?? [0, 64, 128, 192]
+    const controls = process.env.CONTROLS?.split(',').map(Number) ?? [384, 512, 640, 768, 896]
     const p = initPatch()
     vowelFilter(p, 512)
     p.set('filter1resonance', 576)
+    p.set('filter1vowelorder', Number(process.env.ORDER ?? 0))
     const SEG = 0.4
     const grid = cutoffs.flatMap((c) => controls.map((k) => [c, k]))
     const x = await take(
