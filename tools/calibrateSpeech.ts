@@ -7,6 +7,9 @@
 //   noise            noise through Filter 2 alone (BP), Cutoff swept: band centre per value
 //   pitch            Step LFO on Osc 1 Pitch at depth 128: semitones per step unit
 //   envpitch         ENV 3 (decaying from full) on Osc 1 Pitch at depth 32: semitones at full envelope
+//   control          Saw through the Vowel filter at Cutoffs 0..192 (A to between A and E) and Formant
+//                    Controls 384..896: formant peaks per pair, to find the a of cat (F1 ~680, F2 ~1800)
+//   controlroute     a Step LFO on Filt 1 Control (depth 128) at A: steps 0, 16, 32, 64, one second each
 //   morphs           the Vowel filter's sound between every pair of its vowels (four orders cover
 //                    all ten pairs), Cutoff in steps of 32: src/ui/vowelMorphs.generated.ts
 //   positions        Saw through the Vowel filter, Cutoff in steps of 32: the best Cutoff per vowel
@@ -226,6 +229,33 @@ try {
       const f = frequency(x, Math.round(t * RATE), 2400)
       console.log(`${t.toFixed(2)} s: ${f.toFixed(2)} Hz, ${(12 * Math.log2(f / 130.81)).toFixed(2)} semitones`)
     }
+  } else if (experiment === 'control') {
+    const cutoffs = [0, 64, 128, 192]
+    const controls = [384, 512, 640, 768, 896]
+    const p = initPatch()
+    vowelFilter(p, 512)
+    p.set('filter1resonance', 576)
+    const SEG = 0.4
+    const grid = cutoffs.flatMap((c) => controls.map((k) => [c, k]))
+    const x = await take(
+      p,
+      36,
+      grid.length * SEG,
+      grid.flatMap(([c, k], i) => [
+        [i * SEG, 'filter1cutoff', c] as [number, string, number],
+        [i * SEG, 'filter1special', k] as [number, string, number],
+      ]),
+    )
+    grid.forEach(([c, k], i) => console.log(`cutoff ${String(c).padStart(4)} control ${String(k).padStart(4)} (${k / 8}): ${formants(x, Math.round((i * SEG + 0.15) * RATE))}`))
+  } else if (experiment === 'controlroute') {
+    const p = initPatch()
+    vowelFilter(p, 512)
+    p.set('filter1resonance', 576)
+    p.set('filter1cutoff', 0)
+    const steps = [0, 16, 32, 64]
+    stepLfo(p, steps, 91, 1024)
+    const x = await take(p, 36, steps.length)
+    steps.forEach((v, i) => console.log(`step ${String(v).padStart(3)}: ${formants(x, Math.round((i + 0.3) * RATE))}`))
   } else if (experiment === 'morphs') {
     // Each order puts the same five vowels at 0, 256, .. 1024 in its own sequence; between two
     // neighbours the filter morphs. AEIOU, AIUEO, AUIOE and AOUIE have all ten pairs between them.

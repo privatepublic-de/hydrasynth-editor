@@ -96,6 +96,8 @@ interface Segment {
   pitch: number
   /** The voiced sound whose wave OSC 1 plays (null: the next one's, like `pos`). */
   shape: string | null
+  /** Formant Control above its 64 (raw), for vowels the sweep can't make at 64 (the a of cat). */
+  control: number
 }
 
 /**
@@ -149,6 +151,11 @@ export interface Tuning {
   breath: number
   /** Filter 1 Cutoff (raw) of r: close to the vowels around it, it melts into them. */
   rPosition: number
+  /**
+   * Formant Control raised (raw, over 512) for the a of cat: on its place between A and E it is
+   * too low (F1 589, F2 1635 Hz); +64 raises both to ~654 / 1830 (tools/calibrateSpeech.ts control).
+   */
+  aeControl: number
   /** Filter 1 Cutoff (raw) per vowel, where it differs from VOWEL_POS. */
   vowelPositions: Partial<Record<string, number>>
 }
@@ -180,6 +187,7 @@ export const TUNING: Tuning = {
   hissLevel: 1,
   breath: 55,
   rPosition: between(I, O, 0.5),
+  aeControl: 64,
   vowelPositions: {},
 }
 
@@ -208,7 +216,7 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
   })
   const out: Segment[] = []
   const seg = (sound: string, ms: number, s: Partial<Segment> = {}) =>
-    out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, ...s })
+    out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, control: 0, ...s })
   for (const { sound: s, stressed } of pronounce(text, dictionary)) {
     if (s === '') {
       seg('', tune.gapMs)
@@ -221,8 +229,9 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
       const pitch = stressed ? 1.5 : 0
       const ms = lengthOf(s, stressed)
       // A diphthong has time on both ends, a little more where it glides to: either is easily lost.
-      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: posOf(v), voice: 128, pitch, shape: v }))
-      else seg(s, ms, { pos: posOf(s), voice: 128, pitch, shape: s })
+      const control = (v: string) => (v === 'ae' ? tune.aeControl : 0)
+      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: posOf(v), voice: 128, pitch, shape: v, control: control(v) }))
+      else seg(s, ms, { pos: posOf(s), voice: 128, pitch, shape: s, control: control(s) })
     } else if (s === 'm' || s === 'n' || s === 'ng') {
       seg(s, lengthOf(s), { pos: VOWEL_POS.uw, voice: 70, shape: s })
     } else if (s === 'h') {
@@ -411,7 +420,9 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, jump: (a, b) => offPath(order.name, 512 + 8 * a, 512 + 8 * b) },
     { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0 }, // Osc 1 Vol
     { target: 77, depth: 1024, value: (s) => s.noise / 2, glideMs: tune.noiseGlideMs, end: 0 }, // Noise Vol
-    { target: 96, depth: 768, value: (s) => (s.band - 512) / 8, glideMs: tune.noiseGlideMs, end: 0 }, // Filt 2 Cutoff
+    // Filt 2 Cutoff while noise sounds; while it doesn't, Filter 2 hears nothing and the same curve
+    // carries Formant Control (slot 7, depth CONTROL_DEPTH) for the vowels that need it.
+    { target: 96, depth: 768, value: (s) => (s.noise ? (s.band - 512) / 8 : (s.control * 8) / CONTROL_DEPTH), glideMs: tune.noiseGlideMs, end: 0 },
     list
       ? // Osc 1 WaveScan: the sound's slot (slot i of 8 sits at i/7 of the range). One step's glide
         // at most: a longer ramp would play the slots between, other sounds' waves.
@@ -454,6 +465,10 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     p.set(`modmatrix${i + 1}modtarget`, c.target)
     p.set(`modmatrix${i + 1}depth`, c.depth)
   })
+  // LFO 4 also moves Formant Control: by step * CONTROL_DEPTH / 8 (raw), so +-64 steps is +-128.
+  p.set('modmatrix7modsource', 9) // LFO 4
+  p.set('modmatrix7modtarget', 91) // Filt 1 Control
+  p.set('modmatrix7depth', 512 + CONTROL_DEPTH * 4)
 
   if (list) {
     // OSC 1 scans the waves (slots 2-8 store Off and Silence ahead of them; unused ones Off).
@@ -480,6 +495,9 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   const sounds = segments.map((s) => s.sound).filter((s, i, all) => !(s in STOP && all[i - 1] === s))
   return { patch: p, sounds, ms: Math.round(total * t.stepMs), dropped, order: order.name }
 }
+
+/** Depth (of 128) of LFO 4's route to Formant Control. */
+const CONTROL_DEPTH = 16
 
 /** The Vowel Order choices (filter1vowelorder 0..7): the five vowels at Cutoff 0, 256, .. 1024 in this sequence. */
 const ORDERS = ['AEIOU', 'AIUEO', 'AUIOE', 'AOUIE', 'IOUAE', 'UEAOI', 'IOEAU', 'UIEAO']
