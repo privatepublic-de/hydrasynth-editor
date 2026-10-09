@@ -31,12 +31,13 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
   const [input, setInput] = useState(text)
   const [source, setSource] = useState(1)
   const [pitch, setPitch] = useState(1)
+  const [sing, setSing] = useState(false)
   const [dictionary, setDictionary] = useState<Pronunciations | null>(null)
   useEffect(() => {
     ref.current?.showModal()
     void loadPronunciations().then(setDictionary)
   }, [])
-  const speech = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary })
+  const speech = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary, sing })
   const words = input.trim()
 
   const replace = async () => {
@@ -47,7 +48,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
       const levels = await waveLevels()
       if (levels.filter(Boolean).length < WAVE_FEATURES.length) return onDone("The wave data didn't load", input)
       const waves = { levels, f0: PITCHES[pitch].hz, fixed: SOURCES[source].fixed }
-      patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary, waves })!.patch
+      patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary, waves, sing })!.patch
     }
     void loadPatch(patch, `Speech patch “${words}”`)
     onDone(
@@ -71,8 +72,9 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
         {dirty && ` Your changes to “${name}” haven’t been written to the synth.`}
       </p>
       <p>
-        {SOURCES[source].says} through the Vowel filter and noise through Filter 2, run by five one-shot Step LFOs: vowel, voicing,
-        hiss, hiss colour and {SOURCES[source].lfo5}. {speech ? `It says ${speech.sounds.map((s) => s || '·').join(' ')} in ${(speech.ms / 1000).toFixed(1)} s; hold the note at least that long.` : 'There are no words to say.'}
+        {SOURCES[source].says} through the Vowel filter and noise through Filter 2, run by one-shot Step LFOs: vowel, voicing,{' '}
+        {sing && SOURCES[source].lfo5 === 'melody' ? 'hiss and hiss colour' : `hiss, hiss colour and ${sing ? 'wave' : SOURCES[source].lfo5}`}
+        {sing ? '; the keys play the tune' : ''}. {speech ? `It says ${speech.sounds.map((s) => s || '·').join(' ')} in ${(speech.ms / 1000).toFixed(1)} s; hold the note at least that long.` : 'There are no words to say.'}
         {speech?.dropped ? ` Too long: the last ${speech.dropped} sounds are left out.` : ''}
       </p>
       <label
@@ -105,6 +107,13 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
             </option>
           ))}
         </select>
+      </label>
+      <label
+        className="speech-dialog__field"
+        title="Mono: the keys give the pitch, no melody. Play legato and the phrase goes on at the new note (a short glide between them); let go and the next note starts it again. A phrase ending on a vowel holds it. Hold past twice the phrase and it starts over."
+      >
+        <input type="checkbox" checked={sing} onChange={(e) => setSing(e.target.checked)} />
+        Sing: Mono, play legato over the phrase
       </label>
       <div className="write-dialog__actions">
         <button type="button" className="function-button" onClick={() => (ref.current?.close(), onDone('', input))}>

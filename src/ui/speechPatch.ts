@@ -15,6 +15,8 @@
 // With `waves`, OSC 1 plays a WaveScan list of waves whose harmonics already show each sound's
 // formants at the note it's tuned for (src/ui/waveSpeech.ts) instead of the Saw; LFO 5 then steps
 // WaveScan, and ENV 3 lets the phrase fall (or a yes/no question rise) in pitch: no melody on its syllables.
+// With `sing`, the keys give the pitch: Mono, no melody, and a legato note goes on with the phrase
+// at its pitch (see SING_STEPS) instead of starting it again.
 //
 // Measured on a Hydrasynth Desktop (fw 2.x) with tools/calibrateSpeech.ts; see CALIBRATION.
 import { formatValue } from '../params/display'
@@ -559,14 +561,25 @@ const RATES: [number, number][] = (() => {
   return out
 })()
 
-/** Steps per segment and the rate that fits the phrase into 64 steps, as fine as it can. */
-function timing(segments: Segment[], speed: number) {
+/**
+ * Sung, the phrase takes at most this many of the 64 steps, the rest hold its end. In Mono with
+ * the LFOs' Trig Sync on Single, a legato note keeps the one shared LFO running, but the one-shot
+ * then stops a cycle after the latest note, not the first: the LFO plays the phrase's start
+ * again after the cycle ends, until then (tools/calibrateSpeech.ts legato). A cycle twice the
+ * phrase leaves that replay to keys held past twice the phrase's length.
+ */
+const SING_STEPS = 32
+/** Mono glide between legato notes when sung: short, a slide rather than a sweep (0..127). */
+const SING_GLIDE = 24
+
+/** Steps per segment and the rate that fits the phrase into `steps` steps, as fine as it can. */
+function timing(segments: Segment[], speed: number, steps = STEPS - 1) {
   // Fastest first: the first rate where every segment gets a step and all fit.
   for (let r = RATES.length - 1; r >= 0; r--) {
     const [raw, hz] = RATES[r]
     const stepMs = 1000 / hz
     const counts = segments.map((s) => Math.max(1, Math.round((s.ms * speed) / stepMs)))
-    if (counts.reduce((a, b) => a + b, 0) <= STEPS - 1) return { raw, hz, stepMs, counts }
+    if (counts.reduce((a, b) => a + b, 0) <= steps) return { raw, hz, stepMs, counts }
   }
   return null
 }
@@ -577,7 +590,7 @@ export interface SpeechPatch {
   sounds: string[]
   /** How long the phrase takes (ms). */
   ms: number
-  /** Sounds left out: more than the 63 steps hold. */
+  /** Sounds left out: more than the steps hold (63, sung SING_STEPS). */
   dropped: number
   /** The Vowel filter's order for this phrase (see chooseOrder). */
   order: string
@@ -596,6 +609,11 @@ export interface SpeechPatchOptions {
   dictionary?: Pronunciations | null
   /** Overrides of TUNING. */
   tuning?: Partial<Tuning>
+  /**
+   * For singing: Mono, and the keys give the pitch (no melody); legato notes keep the phrase
+   * going, a short glide between them. It ends on its last vowel, held, if it ends on one.
+   */
+  sing?: boolean
 }
 
 /** Envelope times (raw -> ms) the synth offers, read from its own display table. */
@@ -633,7 +651,7 @@ function waveList(segments: Segment[], levels: (number[] | null)[], f0: number) 
 }
 
 /** The Init patch turned into a patch that says `text` on each note; null if there's nothing to say. */
-export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, tuning }: SpeechPatchOptions = {}): SpeechPatch | null {
+export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, tuning, sing = false }: SpeechPatchOptions = {}): SpeechPatch | null {
   const tune = { ...TUNING, ...tuning }
   // Statement, ".", "!", wh- or yes/no question: the phrase's melody (TUNES).
   const kind = tuneOf(text)
@@ -643,10 +661,10 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   const nucleus = nucleusOf(all)
   if (nucleus) for (let i = nucleus[0]; i < nucleus[0] + nucleus[1]; i++) all[i].ms *= TUNES[kind].nucleusLength
   // More segments than steps: say less (the end goes).
-  const segments = all.slice(0, STEPS - 1)
+  const segments = all.slice(0, sing ? SING_STEPS : STEPS - 1)
   const dropped = all.length - segments.length
   if (!segments.length) return null
-  const t = timing(segments, speed)!
+  const t = timing(segments, speed, sing ? SING_STEPS : STEPS - 1)!
 
   const p = new Patch(initPatchBytes())
   const { offset, text: marker } = CALIBRATION.extendedMarker
@@ -684,10 +702,21 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   p.set('voicevibratoamount', tune.vibrato)
   p.set('voicevibratoratesyncoff', tune.vibratoRate)
   p.set('voiceanalogfeel', tune.drift)
+  if (sing) {
+    p.set('voicepolyphony', 1) // Monophonic
+    p.set('voiceglide', 1)
+    p.set('voiceglidelegato', 1)
+    p.set('voiceglidetime', SING_GLIDE)
+    // A legato note doesn't open the Amp (or any envelope) again.
+    for (let e = 1; e <= 5; e++) p.set(`env${e}legato`, 1)
+  }
 
   // The five curves, one value per segment, then a silent hold.
   const total = t.counts.reduce((a, b) => a + b, 0)
-  const pitchAt = melody(segments, t.counts, kind, tune)
+  const pitchAt = sing ? () => 0 : melody(segments, t.counts, kind, tune)
+  // Sung, a phrase ending on a vowel holds it while the key is down; else it ends silent.
+  const last = [...segments].reverse().find((s) => s.sound !== '')
+  const holdLast = sing && !!last?.vowel
   // The vowel order that lets this phrase glide where it should; positions move into it.
   const keys = segments.map((s) => String(s.pos))
   const order = chooseOrder(
@@ -736,13 +765,14 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   ]
   curves.forEach((c, i) => {
     const lfo = `lfo${i + 1}`
+    if (holdLast && !(list && i === 4)) c.end = c.value(last!, total)
     p.set(`${lfo}wave`, 10)
-    p.set(`${lfo}steps`, total + 1)
+    p.set(`${lfo}steps`, sing ? STEPS : total + 1)
     p.set(`${lfo}bpmsync`, 0)
     // The Speed macro adds SPEED_CENTER back in its middle.
     p.set(`${lfo}ratesyncoff`, Math.max(0, t.raw - SPEED_CENTER))
     p.set(`${lfo}oneshot`, 1)
-    p.set(`${lfo}trigsync`, 0)
+    p.set(`${lfo}trigsync`, sing ? 1 : 0) // Single : Poly
     p.set(`${lfo}level`, 1024)
     p.set(`${lfo}smooth`, c.glideMs > 0 ? 127 : 0)
     // One value per step, then the end; ramps between sounds over `width` steps (the end stays exact).
@@ -786,7 +816,7 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
         )
           for (let k = Math.max(0, b - Math.ceil((width - 1) / 2)); k <= Math.min(values.length - 2, b + Math.floor((width - 1) / 2)); k++) ramped[k] = values[k]
     ramped.forEach((v, k) => p.set(`${lfo}step${k + 1}`, stepRaw(v)))
-    for (let step = ramped.length + 1; step <= STEPS; step++) p.set(`${lfo}step${step}`, 512)
+    for (let step = ramped.length + 1; step <= STEPS; step++) p.set(`${lfo}step${step}`, sing ? stepRaw(c.end) : 512)
     p.set(`modmatrix${i + 1}modsource`, 6 + i) // LFO 1..5
     p.set(`modmatrix${i + 1}modtarget`, c.target)
     p.set(`modmatrix${i + 1}depth`, c.depth)
@@ -804,6 +834,8 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
       const w = list.waves[slot - 1]
       p.set(`osc1wavscanwave${slot}`, w === undefined ? (slot === 1 ? 3 : 0) : slot === 1 ? w : w + 2)
     }
+  }
+  if (list && !sing) {
     // The phrase's pitch on ENV 3 instead (a full envelope at depth d of 128 is d * 64/128 / 5
     // semitones). A statement falls (TUNES fall: 2, 2.5 after ".", 3 after "!") over its Decay (which takes ~2x the time shown); a
     // question rises by questionRise over an Attack as long as the phrase (shown time; curve Exp

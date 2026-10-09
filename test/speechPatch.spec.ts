@@ -66,6 +66,27 @@ describe('buildSpeechPatch', () => {
     expect(long.patch.get('lfo1steps')).toBe(64)
   })
 
+  it('sung: Mono and legato, no melody, the phrase in the first half of the steps, its last vowel held', () => {
+    const s = buildSpeechPatch('how now brown cow', { sing: true })!
+    expect(show(s, 'voicepolyphony')).toBe('Monophonic')
+    expect(show(s, 'voiceglide')).toBe('Glide')
+    expect(s.patch.get('voiceglidelegato')).toBe(1)
+    for (let e = 1; e <= 5; e++) expect(s.patch.get(`env${e}legato`)).toBe(1)
+    for (let l = 1; l <= 5; l++) {
+      expect(show(s, `lfo${l}trigsync`)).toBe('Single')
+      expect(s.patch.get(`lfo${l}steps`)).toBe(64)
+    }
+    for (let n = 1; n <= 64; n++) expect(step(s, 5, n)).toBe(0)
+    // The phrase in at most 32 steps, then "cow"'s vowel, voiced, to the end.
+    const hz = parseFloat(formatValue(param('lfo1ratesyncoff'), s.patch.get('lfo1ratesyncoff') + 96).replace(',', '.'))
+    expect(Math.round((s.ms * hz) / 1000)).toBeLessThanOrEqual(32)
+    expect(step(s, 2, 64)).toBeGreaterThan(30)
+    expect(step(s, 1, 64)).toBe(step(s, 1, 33))
+    // Ending on a consonant, it ends silent.
+    const world = buildSpeechPatch('hello world', { sing: true })!
+    expect(step(world, 2, 64)).toBe(0)
+  })
+
   it('has Speed (LFO rates), Fundamental (OSC 3 with the voicing), Voice (Formant Control) and Whisper (breath for voice) macros', () => {
     const s = buildSpeechPatch('hello world')!
     expect(s.patch.macroName(1)).toBe('Speed')

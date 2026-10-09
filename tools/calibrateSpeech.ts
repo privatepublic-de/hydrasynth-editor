@@ -22,6 +22,8 @@
 //   positions        Saw through the Vowel filter, Cutoff in steps of 32: the best Cutoff per vowel
 //   scan             six waves in the WaveScan list, a Step LFO on Osc 1 WaveScan to slot 0..5: which wave sounds
 //   speak <words> [saw|waves|fixed]  the speech patch (src/ui/speechPatch.ts) at C3, saved to local/speech-samples
+//   legato [words]   the speech patch in Mono, a second note overlapping the first halfway through (and
+//                    one after letting go): does the phrase go on, or start again? Per LFO Trig Sync
 //   sources          each vowel at C2/C3/C4 from a Saw or from its matched wave (src/ui/waveSpeech.ts),
 //                    through the Vowel filter or not: how often it reads as the right vowel
 // The patches carry the ETCD marker, without which the synth ignores LFO steps 9-64.
@@ -493,6 +495,48 @@ ${Object.keys(pairs)
     const out = `local/speech-samples/${arg.replace(/\?/g, ' Q').replace(/!/g, ' X').replace(/\./g, ' P').trim().replace(/\W+/g, '-')}${process.argv[4] === 'fixed' ? '-fixed' : withWaves ? '-waves' : '-saw'}${process.env.SUFFIX ?? ''}.wav`
     copyFileSync(FILE, out)
     console.log('saved', out)
+  } else if (experiment === 'legato') {
+    const words = arg ?? 'how now brown cow'
+    const dictionary = parsePronunciations(readFileSync('public/pronunciations.txt', 'utf8'))
+    const s = buildSpeechPatch(words, { dictionary })!
+    const len = s.ms / 1000
+    const change = Math.round(len * 0.45 * 100) / 100
+    // Level per 10 ms (dB): the phrase's rhythm of sounds and gaps, which pitch hardly changes.
+    const levels = (x: Float64Array) =>
+      Array.from({ length: Math.floor(x.length / (RATE / 100)) }, (_, i) => {
+        let e = 0
+        for (let j = 0; j < RATE / 100; j++) e += x[i * (RATE / 100) + j] ** 2
+        return 10 * Math.log10(e / (RATE / 100) + 1e-12)
+      })
+    const corr = (a: number[], b: number[]) => {
+      const n = Math.min(a.length, b.length)
+      const ma = a.slice(0, n).reduce((p, v) => p + v, 0) / n
+      const mb = b.slice(0, n).reduce((p, v) => p + v, 0) / n
+      let ab = 0, aa = 0, bb = 0
+      for (let i = 0; i < n; i++) (ab += (a[i] - ma) * (b[i] - mb)), (aa += (a[i] - ma) ** 2), (bb += (b[i] - mb) ** 2)
+      return ab / Math.sqrt(aa * bb)
+    }
+    mkdirSync('local/speech-samples', { recursive: true })
+    const base = levels(await take(s.patch, 48, len + change + 0.4))
+    copyFileSync(FILE, `local/speech-samples/legato-${words.replace(/\W+/g, '-')}-single-note.wav`)
+    const variants = [
+      { label: 'poly-trig', trig: 0, legato: true },
+      { label: 'single-trig', trig: 1, legato: true },
+      { label: 'single-trig-detached', trig: 1, legato: false },
+    ]
+    for (const v of variants) {
+      const p = new Patch(s.patch.bytes.slice())
+      p.set('voicepolyphony', 1)
+      p.set('voiceglidelegato', 1)
+      for (let e = 1; e <= 5; e++) p.set(`env${e}legato`, 1)
+      for (let l = 1; l <= 5; l++) p.set(`lfo${l}trigsync`, v.trig)
+      const x = levels(await take(p, 48, len + change + 0.4, [], [[change, 55, v.legato]]))
+      const after = x.slice(Math.round(change * 100) + 5, Math.round((change + len) * 100))
+      const on = corr(after, base.slice(Math.round(change * 100) + 5))
+      const again = corr(after, base.slice(5))
+      console.log(`${v.label}: after the second note at ${change} s, like the phrase going on ${on.toFixed(2)}, like it starting again ${again.toFixed(2)}`)
+      copyFileSync(FILE, `local/speech-samples/legato-${words.replace(/\W+/g, '-')}-${v.label}.wav`)
+    }
   } else if (experiment === 'sources') {
     const levels = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves.map((w: { cycle: string }) =>
       harmonicLevels(Float32Array.from(new Int16Array(new Uint8Array(Buffer.from(w.cycle, 'base64')).buffer), (v) => v / 32767)),

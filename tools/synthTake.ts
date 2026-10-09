@@ -26,8 +26,17 @@ export async function openSynth(file: string) {
   const nrpn = (key: string, value: number) => session.sendRaw(nrpnBytes(CHANNEL, encodeNrpn(param(key), value)!))
   let held = -1
 
-  /** Plays `patch` with `note` held `holdS`, sending `changes` [s after note-on, key, value]; the recording (in `file`) from note-on. */
-  async function take(patch: Patch, note: number, holdS: number, changes: [number, string, number][] = []): Promise<Float64Array> {
+  /**
+   * Plays `patch` with `note` held `holdS`, sending `changes` [s after note-on, key, value]; the recording (in `file`) from note-on.
+   * `notes` [s after note-on, note, legato]: another note instead of the held one, overlapping it (legato) or after letting go.
+   */
+  async function take(
+    patch: Patch,
+    note: number,
+    holdS: number,
+    changes: [number, string, number][] = [],
+    notes: [number, number, boolean][] = [],
+  ): Promise<Float64Array> {
     await session.uploadToRam(7, 127, patch.bytes)
     await session.reloadSlot(CHANNEL, 7, 127)
     await sleep(200)
@@ -36,12 +45,24 @@ export async function openSynth(file: string) {
     const t0 = Date.now()
     session.sendRaw(noteOn(CHANNEL, note, 100))
     held = note
-    for (const [at, key, value] of [...changes].sort((a, b) => a[0] - b[0])) {
-      await sleep(Math.max(0, at * 1000 - (Date.now() - t0)))
-      nrpn(key, value)
+    const events = [
+      ...changes.map(([at, key, value]) => ({ at, run: () => nrpn(key, value) })),
+      ...notes.map(([at, next, legato]) => ({
+        at,
+        run: () => {
+          if (!legato) session.sendRaw(noteOff(CHANNEL, held))
+          session.sendRaw(noteOn(CHANNEL, next, 100))
+          if (legato) session.sendRaw(noteOff(CHANNEL, held))
+          held = next
+        },
+      })),
+    ].sort((a, b) => a.at - b.at)
+    for (const e of events) {
+      await sleep(Math.max(0, e.at * 1000 - (Date.now() - t0)))
+      e.run()
     }
     await sleep(Math.max(0, holdS * 1000 - (Date.now() - t0)))
-    session.sendRaw(noteOff(CHANNEL, note))
+    session.sendRaw(noteOff(CHANNEL, held))
     held = -1
     await done
     const x = readWav(file)
