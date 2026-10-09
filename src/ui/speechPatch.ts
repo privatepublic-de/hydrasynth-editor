@@ -59,16 +59,16 @@ export const VOWEL_POS: Record<string, number> = {
 }
 const DIPHTHONGS: Record<string, [string, string]> = { ey: ['eh', 'iy'], ay: ['aa', 'iy'], aw: ['aa', 'uw'], ow: ['ow', 'uw'], oy: ['ao', 'iy'] }
 const bandRaw = (hz: number) => Math.round(512 + CALIBRATION.bandOctaveRaw * Math.log2(hz / CALIBRATION.bandAt512Hz))
-/** Hisses: noise level (0..128) and band centre. Voiced ones keep some voice. */
+/** Hisses: noise level (0..128) and band centre. Voiced ones keep some voice; v and dh are mostly that. */
 const HISS: Record<string, { noise: number; hz: number; voice: number }> = {
   s: { noise: 110, hz: 6000, voice: 0 },
   z: { noise: 80, hz: 6000, voice: 70 },
   sh: { noise: 110, hz: 2800, voice: 0 },
   zh: { noise: 80, hz: 2800, voice: 70 },
   f: { noise: 60, hz: 7000, voice: 0 },
-  v: { noise: 45, hz: 7000, voice: 70 },
+  v: { noise: 25, hz: 7000, voice: 70 },
   th: { noise: 55, hz: 6500, voice: 0 },
-  dh: { noise: 40, hz: 6500, voice: 70 },
+  dh: { noise: 20, hz: 6500, voice: 70 },
 }
 /** Stops: a closure (voiced ones murmur through it), then a burst of noise at their place. */
 const STOP: Record<string, { voiced: boolean; hz: number; then?: string }> = {
@@ -193,7 +193,13 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
             : tune.sonorantLength
     return tune.tempo * factor * (typeof l === 'number' ? l : l[stressed ? 1 : 0])
   }
-  const hiss = (s: string) => ({ noise: HISS[s].noise * tune.hissLevel, band: bandRaw(HISS[s].hz), voice: HISS[s].voice })
+  const hiss = (s: string) => ({
+    noise: HISS[s].noise * tune.hissLevel,
+    band: bandRaw(HISS[s].hz),
+    voice: HISS[s].voice,
+    // v and dh buzz through nearly closed lips or teeth: dark, like a stop's closure.
+    ...(s === 'v' || s === 'dh' ? { pos: VOWEL_POS.uw } : {}),
+  })
   const out: Segment[] = []
   const seg = (sound: string, ms: number, s: Partial<Segment> = {}) =>
     out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, ...s })
@@ -233,9 +239,9 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
   while (out.length && out.at(-1)!.sound === '') out.pop()
   // A voiceless hiss after a vowel starts a little late: the vowel rings on into it.
   for (let i = 1; i < out.length; i++) if (out[i].noise && !out[i].voice && out[i].sound in HISS && out[i - 1].voice === 128) out[i - 1].ms += tune.hissDelayMs
-  // A phrase-final vowel lasts longer.
+  // A phrase's last vowel lasts longer, stressed or not ("very": its ee was gone in the glides).
   const lastVowel = out.map((s) => s.voice).lastIndexOf(128)
-  if (lastVowel >= 0) out[lastVowel].ms *= 1.3
+  if (lastVowel >= 0) out[lastVowel].ms = Math.max(out[lastVowel].ms, lengthOf(out[lastVowel].sound, true)) * 1.3
   // Consonants take the formants of the vowel after them (or before, at the end).
   let next = VOWEL_POS.ah
   for (let i = out.length - 1; i >= 0; i--) if (out[i].pos === null) out[i].pos = next; else next = out[i].pos!
@@ -377,8 +383,18 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
    * average over that many steps), and glides straight from step to step (Smooth 127): a curve
    * that holds each sound and then jumps sounds choppy. A glide of 0 jumps.
    */
-  const curves: { target: number; depth: number; value: (s: Segment, at: number) => number; glideMs: number; end: number }[] = [
-    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0 }, // Filt 1 Cutoff
+  const curves: {
+    target: number
+    depth: number
+    value: (s: Segment, at: number) => number
+    glideMs: number
+    end: number
+    /** Changes from a to b that jump (in one step) instead of gliding. */
+    jump?: (a: number, b: number) => boolean
+  }[] = [
+    // Filt 1 Cutoff. The Vowel filter morphs only along A E I O U: a glide that passes one of them
+    // on the way says it ("very" as "ve-ee-ry"), so such a change jumps.
+    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, jump: passesVowel },
     { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0 }, // Osc 1 Vol
     { target: 77, depth: 1024, value: (s) => s.noise / 2, glideMs: tune.noiseGlideMs, end: 0 }, // Noise Vol
     { target: 96, depth: 768, value: (s) => (s.band - 512) / 8, glideMs: tune.noiseGlideMs, end: 0 }, // Filt 2 Cutoff
@@ -414,6 +430,10 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
       for (let j = from; j <= to; j++) sum += values[j]
       return sum / (to - from + 1)
     })
+    if (c.jump)
+      for (let b = 1; b < values.length - 1; b++)
+        if (values[b] !== values[b - 1] && c.jump(values[b - 1], values[b]))
+          for (let k = Math.max(0, b - Math.ceil((width - 1) / 2)); k <= Math.min(values.length - 2, b + Math.floor((width - 1) / 2)); k++) ramped[k] = values[k]
     ramped.forEach((v, k) => p.set(`${lfo}step${k + 1}`, stepRaw(v)))
     for (let step = ramped.length + 1; step <= STEPS; step++) p.set(`${lfo}step${step}`, 512)
     p.set(`modmatrix${i + 1}modsource`, 6 + i) // LFO 1..5
@@ -445,6 +465,19 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   // A stop's closure and burst are one sound.
   const sounds = segments.map((s) => s.sound).filter((s, i, all) => !(s in STOP && all[i - 1] === s))
   return { patch: p, sounds, ms: Math.round(total * t.stepMs), dropped }
+}
+
+/**
+ * Whether a Filter 1 Cutoff change (in step units, cutoff = 512 + 8 * value) passes one of the five
+ * vowels clearly unlike both ends (over 14 units, 112 raw, away): eh -> r passes I, an "ee" neither
+ * has; oy's ao -> iy passes I too, but ends next to it, so that glide stays.
+ */
+function passesVowel(a: number, b: number): boolean {
+  const [lo, hi] = [Math.min(a, b), Math.max(a, b)]
+  return Object.values(CALIBRATION.vowelAt).some((at) => {
+    const v = (at - 512) / 8
+    return v > lo + 14 && v < hi - 14
+  })
 }
 
 /** A step value (-64..64) as stored. */
