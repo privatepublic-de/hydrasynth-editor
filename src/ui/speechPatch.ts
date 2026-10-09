@@ -220,9 +220,12 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
   const out: Segment[] = []
   const seg = (sound: string, ms: number, s: Partial<Segment> = {}) =>
     out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, control: 0, ...s })
-  for (const { sound: s, stressed } of pronounce(text, dictionary)) {
+  const sounds = pronounce(text, dictionary)
+  for (const [n, { sound: s, stressed }] of sounds.entries()) {
     if (s === '') {
-      seg('', tune.gapMs)
+      // No pause before an h: silence and then a puff of noise is how a k sounds ("the whole" as
+      // "thu-k-ole").
+      if (sounds[n + 1]?.sound !== 'h') seg('', tune.gapMs)
     } else if (s in DIPHTHONGS || s in VOWEL_POS) {
       const glide = ['w', 'y', 'r', 'l'].includes(s)
       if (glide) {
@@ -238,7 +241,16 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
     } else if (s === 'm' || s === 'n' || s === 'ng') {
       seg(s, lengthOf(s), { pos: VOWEL_POS.uw, voice: 70, shape: s })
     } else if (s === 'h') {
-      seg(s, lengthOf(s), { noise: tune.breath, band: bandRaw(1500) })
+      // Breath fading in, not a burst; after a voiced sound still a little voiced, as between vowels.
+      // It sounds through the mouth already shaped for the next vowel, so its band sits at that
+      // vowel's F2: a fixed 1.5 kHz before a dark o made "whole" sound like "kole".
+      const ms = lengthOf(s)
+      const voice = (out.at(-1)?.voice ?? 0) >= 70 ? 40 : 0
+      const next = sounds.slice(n + 1).find((x) => x.sound in DIPHTHONGS || x.sound in VOWEL_POS)?.sound
+      const vowel = next ? (DIPHTHONGS[next]?.[0] ?? next) : 'ah'
+      const band = bandRaw(Math.exp(formantsAt('AEIOU', vowel === 'r' ? tune.rPosition : posOf(vowel))[1]))
+      seg(s, ms * 0.4, { noise: tune.breath * 0.35, band, voice })
+      seg(s, ms * 0.6, { noise: tune.breath, band, voice: voice / 2 })
     } else if (s in HISS) {
       seg(s, lengthOf(s), hiss(s))
     } else if (s in STOP) {
