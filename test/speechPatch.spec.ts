@@ -66,25 +66,48 @@ describe('buildSpeechPatch', () => {
     expect(long.patch.get('lfo1steps')).toBe(64)
   })
 
-  it('sung: Mono and legato, no melody, the phrase in the first half of the steps, its last vowel held', () => {
+  it('sung: Mono and legato, no melody, LFO 5 stopping every LFO at the end, its last vowel held', () => {
     const s = buildSpeechPatch('how now brown cow', { sing: true })!
+    const spoken = buildSpeechPatch('how now brown cow')!
     expect(show(s, 'voicepolyphony')).toBe('Monophonic')
     expect(show(s, 'voiceglide')).toBe('Glide')
     expect(s.patch.get('voiceglidelegato')).toBe(1)
     for (let e = 1; e <= 5; e++) expect(s.patch.get(`env${e}legato`)).toBe(1)
+    const steps = s.patch.get('lfo1steps')
+    expect(steps).toBe(spoken.patch.get('lfo1steps'))
     for (let l = 1; l <= 5; l++) {
       expect(show(s, `lfo${l}trigsync`)).toBe('Single')
-      expect(s.patch.get(`lfo${l}steps`)).toBe(64)
+      expect(s.patch.get(`lfo${l}steps`)).toBe(steps)
     }
-    for (let n = 1; n <= 64; n++) expect(step(s, 5, n)).toBe(0)
-    // The phrase in at most 32 steps, then "cow"'s vowel, voiced, to the end.
-    const hz = parseFloat(formatValue(param('lfo1ratesyncoff'), s.patch.get('lfo1ratesyncoff') + 96).replace(',', '.'))
-    expect(Math.round((s.ms * hz) / 1000)).toBeLessThanOrEqual(32)
-    expect(step(s, 2, 64)).toBeGreaterThan(30)
-    expect(step(s, 1, 64)).toBe(step(s, 1, 33))
+    // LFO 5: nothing, then full on the last step, to every LFO's Rate at -128.
+    for (let n = 1; n < steps; n++) expect(step(s, 5, n)).toBe(0)
+    expect(step(s, 5, steps)).toBe(64)
+    expect(show(s, 'lfo5smooth')).toBe('0')
+    const routes = [5, 11, 12, 13, 14].map((m) => [show(s, `modmatrix${m}modsource`), show(s, `modmatrix${m}modtarget`), s.patch.get(`modmatrix${m}depth`)])
+    expect(routes).toEqual([1, 2, 3, 4, 5].map((l) => ['LFO 5', `LFO ${l} Rate`, 0]))
+    // "cow"'s vowel, voiced, on the last step.
+    expect(step(s, 2, steps)).toBeGreaterThan(30)
     // Ending on a consonant, it ends silent.
     const world = buildSpeechPatch('hello world', { sing: true })!
-    expect(step(world, 2, 64)).toBe(0)
+    expect(step(world, 2, world.patch.get('lfo2steps'))).toBe(0)
+  })
+
+  it('sung with a wave per sound (LFO 5 busy): the phrase in the first 32 steps, the rest hold its end', () => {
+    const levels = Array.from({ length: 300 }, (_, i) => Array.from({ length: 40 }, (_, k) => -((k * (1 + (i % 7))) % 30)))
+    const s = buildSpeechPatch('how now brown cow', { sing: true, waves: { levels, f0: 130.81 } })!
+    expect(s.patch.get('lfo1steps')).toBe(64)
+    expect(step(s, 1, 64)).toBe(step(s, 1, 33))
+    expect(step(s, 2, 64)).toBeGreaterThan(30)
+  })
+
+  it('sung, in its coarser steps, takes about as long as spoken (steps per sound, not per part)', () => {
+    const levels = Array.from({ length: 300 }, (_, i) => Array.from({ length: 40 }, (_, k) => -((k * (1 + (i % 7))) % 30)))
+    for (const words of ['how now brown cow', 'good morning', 'make some noise']) {
+      const sung = buildSpeechPatch(words, { sing: true, waves: { levels, f0: 130.81 } })!
+      const spoken = buildSpeechPatch(words)!
+      expect(Math.abs(sung.ms - spoken.ms) / spoken.ms).toBeLessThan(0.05)
+      expect(sung.sounds).toEqual(spoken.sounds)
+    }
   })
 
   it('has a Freeze macro, also on the Mod Wheel, that pulls every LFO rate to the bottom', () => {

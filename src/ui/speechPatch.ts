@@ -563,26 +563,81 @@ const RATES: [number, number][] = (() => {
 })()
 
 /**
- * Sung, the phrase takes at most this many of the 64 steps, the rest hold its end. In Mono with
- * the LFOs' Trig Sync on Single, a legato note keeps the one shared LFO running, but the one-shot
- * then stops a cycle after the latest note, not the first: the LFO plays the phrase's start
- * again after the cycle ends, until then (tools/calibrateSpeech.ts legato). A cycle twice the
- * phrase leaves that replay to keys held past twice the phrase's length.
+ * Sung, in Mono with the LFOs' Trig Sync on Single, a legato note keeps the one shared LFO
+ * running, but the one-shot then stops a cycle after the latest note, not the first: the LFO
+ * plays the phrase's start again after the cycle ends, until then (tools/calibrateSpeech.ts
+ * legato). Where LFO 5 is free (no melody, no wave per sound), it stops them all at the end
+ * instead: 0 through the phrase, full on its last step, and routed to every LFO's Rate at -128,
+ * so they crawl at 0.02 Hz (~50 s a step) from there (calibrateSpeech stopper). With a wave per
+ * sound on LFO 5, the phrase takes at most this many of the 64 steps and the rest hold its
+ * end: a cycle twice the phrase leaves the replay to keys held past twice its length. Those
+ * coarse steps lose clusters ("brown"), so it's only the fallback.
  */
 const SING_STEPS = 32
 /** Mono glide between legato notes when sung: short, a slide rather than a sweep (0..127). */
 const SING_GLIDE = 24
 
-/** Steps per segment and the rate that fits the phrase into `steps` steps, as fine as it can. */
-function timing(segments: Segment[], speed: number, steps = STEPS - 1) {
+/**
+ * Steps per segment and the rate that fits the phrase into `steps` steps, as fine as it can.
+ * Each part of a sound gets a step at least, which is fine at 63 steps. With `whole`, for steps
+ * too coarse for that (sung, 32): each sound gets a step at least, its start rounded to the
+ * nearest step from the phrase's own timing, and its parts share its steps (stepsOf); a part can
+ * get none. Part by part, the consonants' closures and releases swelled the phrase by a fifth
+ * and left its vowels a step each ("how now brown cow": each n three steps, each vowel one).
+ */
+function timing(segments: Segment[], speed: number, steps = STEPS - 1, whole = false) {
   // Fastest first: the first rate where every segment gets a step and all fit.
   for (let r = RATES.length - 1; r >= 0; r--) {
     const [raw, hz] = RATES[r]
     const stepMs = 1000 / hz
-    const counts = segments.map((s) => Math.max(1, Math.round((s.ms * speed) / stepMs)))
+    const counts = whole ? stepsOf(segments, speed / stepMs) : segments.map((s) => Math.max(1, Math.round((s.ms * speed) / stepMs)))
     if (counts.reduce((a, b) => a + b, 0) <= steps) return { raw, hz, stepMs, counts }
   }
   return null
+}
+
+/**
+ * Steps per segment, `perMs` steps a ms (timing's `whole`): a run of segments of one sound is
+ * one sound, from the step nearest its start to the one nearest its end, one step at least
+ * (later sounds start later for it), a voiced stop two: its burst alone, without the murmured
+ * closure's dip in the voice, made b, d and g too weak to hear. A sound with fewer steps than
+ * parts keeps the parts that say it most: a burst or hiss (noise) first, then the closure into
+ * the next vowel, then the longest, in their order.
+ */
+function stepsOf(segments: Segment[], perMs: number): number[] {
+  const counts = segments.map(() => 0)
+  let ms = 0
+  let at = 0
+  for (let i = 0; i < segments.length; ) {
+    let j = i
+    while (j + 1 < segments.length && segments[j + 1].sound === segments[i].sound && segments[i].sound !== '') j++
+    const parts = segments.slice(i, j + 1)
+    ms += parts.reduce((a, s) => a + s.ms, 0)
+    const least = STOP[segments[i].sound]?.voiced ? Math.min(2, parts.length) : 1
+    const end = Math.max(at + least, Math.round(ms * perMs))
+    const n = end - at
+    at = end
+    if (n >= parts.length) {
+      // Every part a step, the rest by length, rounded on the running total.
+      let sum = 0
+      let given = 0
+      const all = parts.reduce((a, s) => a + s.ms, 0)
+      parts.forEach((s, k) => {
+        sum += s.ms
+        const upTo = k === parts.length - 1 ? n - parts.length : Math.round(((n - parts.length) * sum) / all)
+        counts[i + k] = 1 + upTo - given
+        given = upTo
+      })
+    } else {
+      const keep = parts
+        .map((s, k) => ({ k, rank: (s.noise > 0 ? 2e6 : 0) + (s.locus?.side === 'next' ? 1e6 : 0) + s.ms }))
+        .sort((a, b) => b.rank - a.rank)
+        .slice(0, n)
+      for (const { k } of keep) counts[i + k] = 1
+    }
+    i = j + 1
+  }
+  return counts
 }
 
 export interface SpeechPatch {
@@ -662,10 +717,13 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   const nucleus = nucleusOf(all)
   if (nucleus) for (let i = nucleus[0]; i < nucleus[0] + nucleus[1]; i++) all[i].ms *= TUNES[kind].nucleusLength
   // More segments than steps: say less (the end goes).
-  const segments = all.slice(0, sing ? SING_STEPS : STEPS - 1)
+  // Sung, LFO 5 stops the phrase at its end where it's free; else the phrase is padded (SING_STEPS).
+  const padded = sing && !!waves && !waves.fixed
+  const stopper = sing && !padded
+  const segments = all.slice(0, padded ? SING_STEPS : STEPS - 1)
   const dropped = all.length - segments.length
   if (!segments.length) return null
-  const t = timing(segments, speed, sing ? SING_STEPS : STEPS - 1)!
+  const t = timing(segments, speed, padded ? SING_STEPS : STEPS - 1, padded)!
 
   const p = new Patch(initPatchBytes())
   const { offset, text: marker } = CALIBRATION.extendedMarker
@@ -748,16 +806,21 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     jump?: (a: number, b: number) => boolean
     /** Changes into or out of a stop glide in one step: a stop is crisp, a long glide slurs it. */
     crisp?: boolean
+    /** Sung: holds each step, gliding half a step at most (see the Smooth below). */
+    holds?: boolean
   }[] = [
     // Filt 1 Cutoff. The Vowel filter morphs only along its order's vowels: a glide that passes one
     // off its way says it ("very" as "ve-ee-ry"), so such a change jumps.
     { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, jump: (a, b) => offPath(order.name, 512 + 8 * a, 512 + 8 * b), crisp: true },
-    { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0, crisp: true }, // Osc 1 Vol
+    { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0, crisp: true, holds: true }, // Osc 1 Vol
     { target: 77, depth: 1024, value: (s) => s.noise / 2, glideMs: tune.noiseGlideMs, end: 0 }, // Noise Vol
     // Filt 2 Cutoff while noise sounds; while it doesn't, Filter 2 hears nothing and the same curve
     // carries Formant Control (slot 7, depth CONTROL_DEPTH) for the vowels that need it.
     { target: 96, depth: 768, value: (s) => (s.noise ? (s.band - 512) / 8 : (s.control * 8) / CONTROL_DEPTH), glideMs: Math.max(tune.noiseGlideMs, 1), end: 0 },
-    list
+    stopper
+      ? // LFO 1-5 Rate (slots 5 and 11-14): nothing until the end, then all of them to the bottom.
+        { target: 144, depth: 0, value: () => 0, glideMs: 0, end: 64 }
+      : list
       ? // Osc 1 WaveScan: the sound's slot (slot i of 8 sits at i/7 of the range). One step's glide
         // at most: a longer ramp would play the slots between, other sounds' waves.
         { target: 13, depth: 1024, value: (s) => ((list.slotOf.get(s.shape ?? '') ?? 0) * 64) / 7, glideMs: Math.min(tune.vowelGlideMs, t.stepMs), end: ((list.slotOf.get(segments.at(-1)!.shape ?? '') ?? 0) * 64) / 7 }
@@ -766,16 +829,20 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   ]
   curves.forEach((c, i) => {
     const lfo = `lfo${i + 1}`
-    if (holdLast && !(list && i === 4)) c.end = c.value(last!, total)
+    if (holdLast && i !== 4) c.end = c.value(last!, total)
     p.set(`${lfo}wave`, 10)
-    p.set(`${lfo}steps`, sing ? STEPS : total + 1)
+    p.set(`${lfo}steps`, padded ? STEPS : total + 1)
     p.set(`${lfo}bpmsync`, 0)
     // The Speed macro adds SPEED_CENTER back in its middle.
     p.set(`${lfo}ratesyncoff`, Math.max(0, t.raw - SPEED_CENTER))
     p.set(`${lfo}oneshot`, 1)
     p.set(`${lfo}trigsync`, sing ? 1 : 0) // Single : Poly
     p.set(`${lfo}level`, 1024)
-    p.set(`${lfo}smooth`, c.glideMs > 0 ? 127 : 0)
+    // Smooth glides its share of a step (smooth/127). Sung, in coarser steps, a whole step's glide
+    // never let a stop's one-step dip in the voice reach its bottom (b, d, g were weak): there
+    // the voicing glides half a step at most and holds each step before that.
+    const smooth = padded && c.holds ? Math.min(127, Math.round((127 * Math.min(c.glideMs, t.stepMs / 2)) / t.stepMs)) : 127
+    p.set(`${lfo}smooth`, c.glideMs > 0 ? smooth : 0)
     // One value per step, then the end; ramps between sounds over `width` steps (the end stays exact).
     const values: number[] = []
     const atStop: boolean[] = []
@@ -817,11 +884,17 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
         )
           for (let k = Math.max(0, b - Math.ceil((width - 1) / 2)); k <= Math.min(values.length - 2, b + Math.floor((width - 1) / 2)); k++) ramped[k] = values[k]
     ramped.forEach((v, k) => p.set(`${lfo}step${k + 1}`, stepRaw(v)))
-    for (let step = ramped.length + 1; step <= STEPS; step++) p.set(`${lfo}step${step}`, sing ? stepRaw(c.end) : 512)
+    for (let step = ramped.length + 1; step <= STEPS; step++) p.set(`${lfo}step${step}`, padded ? stepRaw(c.end) : 512)
     p.set(`modmatrix${i + 1}modsource`, 6 + i) // LFO 1..5
     p.set(`modmatrix${i + 1}modtarget`, c.target)
     p.set(`modmatrix${i + 1}depth`, c.depth)
   })
+  if (stopper)
+    for (let i = 2; i <= 5; i++) {
+      p.set(`modmatrix${9 + i}modsource`, 10) // LFO 5
+      p.set(`modmatrix${9 + i}modtarget`, 142 + 2 * i) // LFO i Rate
+      p.set(`modmatrix${9 + i}depth`, 0) // -128
+    }
   // LFO 4 also moves Formant Control: by step * CONTROL_DEPTH / 8 (raw), so +-64 steps is +-128.
   p.set('modmatrix7modsource', 9) // LFO 4
   p.set('modmatrix7modtarget', 91) // Filt 1 Control
