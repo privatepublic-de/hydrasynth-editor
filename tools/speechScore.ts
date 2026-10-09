@@ -172,3 +172,46 @@ if (process.argv[2] === 'score') {
     `cost ${s.cost.toFixed(2)}: distance ${s.distance.toFixed(2)} (${s.perVoice.map((v) => `${v.voice} ${v.distance.toFixed(2)}`).join(', ')}), stillness ${(s.stillness * 100).toFixed(0)} %`,
   )
 }
+
+/**
+ * The colour of a word's vowel: the mean log-mel spectrum (dB) over its steady middle (frames
+ * within 6 dB of the loudest, around it), with the overall tilt taken out. Not normalised per
+ * recording: in a one-vowel word that would take out the vowel itself.
+ */
+export function vowelColour(file: string): number[] {
+  const x = readWav(file)
+  const rows: { level: number; mel: number[] }[] = []
+  for (let from = 0; from + FRAME < x.length; from += HOP) {
+    const p = power(x, from)
+    rows.push({ level: 10 * Math.log10(p.reduce((a, b) => a + b, 0) + 1e-12), mel: FILTERS.map((w) => 10 * Math.log10(w.reduce((s, wk, k) => s + wk * p[k], 0) + 1e-12)) })
+  }
+  const peak = rows.reduce((b, r, i) => (r.level > rows[b].level ? i : b), 0)
+  let [from, to] = [peak, peak]
+  while (from > 0 && rows[from - 1].level > rows[peak].level - 6) from--
+  while (to < rows.length - 1 && rows[to + 1].level > rows[peak].level - 6) to++
+  const mean = FILTERS.map((_, m) => rows.slice(from, to + 1).reduce((s, r) => s + r.mel[m], 0) / (to - from + 1))
+  // Take out a straight-line tilt over the bands.
+  const n = mean.length
+  const mx = (n - 1) / 2
+  const my = mean.reduce((a, b) => a + b, 0) / n
+  const slope = mean.reduce((s, v, i) => s + (i - mx) * (v - my), 0) / mean.reduce((s, _, i) => s + (i - mx) ** 2, 0)
+  return mean.map((v, i) => v - my - slope * (i - mx))
+}
+
+/** How unlike the references' vowel `recording`'s is: 1 - the mean correlation of their colours (0 = same). */
+export function vowelScore(recording: string, words: string): number {
+  const ours = vowelColour(recording)
+  const corr = (a: number[], b: number[]) => {
+    let ab = 0
+    let aa = 0
+    let bb = 0
+    a.forEach((v, i) => {
+      ab += v * b[i]
+      aa += v * v
+      bb += b[i] * b[i]
+    })
+    return ab / Math.sqrt(aa * bb)
+  }
+  const refs = references(words).map(vowelColour)
+  return 1 - refs.reduce((s, r) => s + corr(ours, r), 0) / refs.length
+}

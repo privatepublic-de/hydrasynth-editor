@@ -45,12 +45,12 @@ describe('buildSpeechPatch', () => {
     expect(s.ms).toBeCloseTo(((steps - 1) * 1000) / hz, -1)
   })
 
-  it('opens on the vowel filter where the vowel sits: "ee" near I, "oo" on U', () => {
+  it('opens on the vowel filter where the vowel sits: "ee" near I, "oo" near U', () => {
     const iy = buildSpeechPatch('ee')!
     const uw = buildSpeechPatch('ooh')!
     // Filt 1 Cutoff = 512 + step * 8 (base 512, depth +64).
     expect(512 + step(iy, 1, 1) * 8).toBe(VOWEL_POS.iy)
-    expect(512 + step(uw, 1, 1) * 8).toBe(CALIBRATION.vowelAt.U)
+    expect(512 + step(uw, 1, 1) * 8).toBe(VOWEL_POS.uw)
     // A hiss is noise without voice.
     const s = buildSpeechPatch('see')!
     expect(step(s, 3, 1)).toBeGreaterThan(40)

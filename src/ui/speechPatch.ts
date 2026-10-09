@@ -47,14 +47,15 @@ const PER_SEMITONE = CALIBRATION.perSemitone
 /**
  * Filter 1 Cutoff (raw) for each vowel and glide: the five anchors, and points between them. The
  * front vowels, uh, r and l where the synth's sweep best matched textbook formants at C2, C3 and
- * C4 alike (tools/calibrateSpeech.ts positions); the rest, which the filter can't quite make
- * (er's low F3, uw's F2), placed by ear.
+ * C4 alike (tools/calibrateSpeech.ts positions); ee, the o of hot, oo and er moved where their
+ * steady middle came closest to reference speech (tools/tuneSpeech.ts vowels) and sounded better;
+ * the rest by ear. The a of cat isn't right anywhere on this sweep.
  */
 const { A, E, I, O, U } = CALIBRATION.vowelAt
 const between = (a: number, b: number, t: number) => Math.round(a + (b - a) * t)
 export const VOWEL_POS: Record<string, number> = {
-  aa: A, ah: between(A, E, 0.19), ae: between(A, E, 0.5), eh: between(A, E, 0.625), ih: E, iy: between(I, E, 0.375),
-  er: between(I, O, 0.42), ao: between(I, O, 0.9), ow: between(O, U, 0.09), uh: between(I, O, 0.875), uw: U,
+  aa: between(A, E, 0.25), ah: between(A, E, 0.19), ae: between(A, E, 0.5), eh: between(A, E, 0.625), ih: E, iy: between(I, O, 0.125),
+  er: between(I, O, 0.67), ao: between(I, O, 0.9), ow: between(O, U, 0.09), uh: between(I, O, 0.875), uw: between(O, U, 0.75),
   w: U, y: between(I, E, 0.375), r: between(I, O, 0.875), l: between(I, O, 0.875),
 }
 const DIPHTHONGS: Record<string, [string, string]> = { ey: ['eh', 'iy'], ay: ['aa', 'iy'], aw: ['aa', 'uw'], ow: ['ow', 'uw'], oy: ['ao', 'iy'] }
@@ -147,6 +148,8 @@ export interface Tuning {
   breath: number
   /** Filter 1 Cutoff (raw) of r: close to the vowels around it, it melts into them. */
   rPosition: number
+  /** Filter 1 Cutoff (raw) per vowel, where it differs from VOWEL_POS. */
+  vowelPositions: Partial<Record<string, number>>
 }
 /**
  * Chosen by ear from tools/tuneSpeech.ts runs: longer vowel glides scored smoother still (160 ms:
@@ -176,6 +179,7 @@ export const TUNING: Tuning = {
   hissLevel: 1,
   breath: 55,
   rPosition: between(I, O, 0.5),
+  vowelPositions: {},
 }
 
 function segmentsOf(text: string, dictionary: Pronunciations | null | undefined, tune: Tuning): Segment[] {
@@ -193,6 +197,7 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
             : tune.sonorantLength
     return tune.tempo * factor * (typeof l === 'number' ? l : l[stressed ? 1 : 0])
   }
+  const posOf = (v: string) => tune.vowelPositions[v] ?? VOWEL_POS[v]
   const hiss = (s: string) => ({
     noise: HISS[s].noise * tune.hissLevel,
     band: bandRaw(HISS[s].hz),
@@ -209,14 +214,14 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
     } else if (s in DIPHTHONGS || s in VOWEL_POS) {
       const glide = ['w', 'y', 'r', 'l'].includes(s)
       if (glide) {
-        seg(s, lengthOf(s), { pos: s === 'r' ? tune.rPosition : VOWEL_POS[s], voice: 100, shape: s })
+        seg(s, lengthOf(s), { pos: s === 'r' ? tune.rPosition : posOf(s), voice: 100, shape: s })
         continue
       }
       const pitch = stressed ? 1.5 : 0
       const ms = lengthOf(s, stressed)
       // A diphthong has time on both ends, a little more where it glides to: either is easily lost.
-      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: VOWEL_POS[v], voice: 128, pitch, shape: v }))
-      else seg(s, ms, { pos: VOWEL_POS[s], voice: 128, pitch, shape: s })
+      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: posOf(v), voice: 128, pitch, shape: v }))
+      else seg(s, ms, { pos: posOf(s), voice: 128, pitch, shape: s })
     } else if (s === 'm' || s === 'n' || s === 'ng') {
       seg(s, lengthOf(s), { pos: VOWEL_POS.uw, voice: 70, shape: s })
     } else if (s === 'h') {
