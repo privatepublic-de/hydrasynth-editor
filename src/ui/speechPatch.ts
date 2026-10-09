@@ -10,7 +10,8 @@
 // Macro 2 (Fundamental) fades in OSC 3, a Saw at the note played that follows the voicing, for
 // melodic speech and chords. Macro 3 (Voice) scales all formants (Formant Control): the middle is
 // the voice as tuned, up a smaller (female, child) one, down a larger one. Macro 4 (Whisper)
-// turns the voice into breath: noise through the Vowel filter instead of OSC 1.
+// turns the voice into breath: noise through the Vowel filter instead of OSC 1. Macro 5 (Freeze,
+// also on the Mod Wheel) stops the phrase on its current sound, to sing on it.
 // ENV 2 (the Amp's) just gates the note; the last step is silent and a one-shot LFO holds it.
 // With `waves`, OSC 1 plays a WaveScan list of waves whose harmonics already show each sound's
 // formants at the note it's tuned for (src/ui/waveSpeech.ts) instead of the Saw; LFO 5 then steps
@@ -921,6 +922,19 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   p.set('macro4depth2', 512 - 64 * 4)
   p.set('macro4target3', 161) // Matrix 8 Depth: voicing to Osc 3 Vol
   p.set('macro4depth3', 512 - 64 * 4)
+
+  // Macro 5, Freeze: every LFO's Rate down by up to 1024 raw, so at the top the phrase stops on
+  // the sound it's at (0.02 Hz, ~50 s a step) and goes on from there when it's turned back. The Mod
+  // Wheel turns it too (slot 10, Macro 5 at +128), to hold a sound while singing on it.
+  p.setMacroName(5, 'Freeze')
+  p.set('macro5panelvalue', 0)
+  for (let i = 1; i <= 5; i++) {
+    p.set(`macro5target${i}`, 142 + 2 * i) // LFO i Rate
+    p.set(`macro5depth${i}`, 0) // -128
+  }
+  p.set('modmatrix10modsource', 22) // Mod Wheel
+  p.set('modmatrix10modtarget', 190) // Macro 5
+  p.set('modmatrix10depth', 1024)
 
   // A sound in several parts (a stop's closure and burst, an h or a nasal) is one sound.
   const sounds = segments.map((s) => s.sound).filter((s, i, all) => s === '' || all[i - 1] !== s)

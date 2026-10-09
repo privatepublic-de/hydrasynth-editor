@@ -110,7 +110,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
       </label>
       <label
         className="speech-dialog__field"
-        title="Mono: the keys give the pitch, no melody. Play legato and the phrase goes on at the new note (a short glide between them); let go and the next note starts it again. A phrase ending on a vowel holds it. Hold past twice the phrase and it starts over."
+        title="Mono: the keys give the pitch, no melody. Play legato and the phrase goes on at the new note (a short glide between them); let go and the next note starts it again. A phrase ending on a vowel holds it. Hold past twice the phrase and it starts over. The Mod Wheel (or Macro 5, Freeze) stops the phrase on its current sound while it's up."
       >
         <input type="checkbox" checked={sing} onChange={(e) => setSing(e.target.checked)} />
         Sing: Mono, play legato over the phrase

@@ -2,7 +2,7 @@
 // memory (no flash write), one held note, NRPN changes at set times, recorded from the default
 // audio input (the synth on inputs 1/2 of an X18) with sox.
 import { spawn } from 'node:child_process'
-import { noteOff, noteOn, sleep } from '../src/midi/channel'
+import { controlChange, noteOff, noteOn, sleep } from '../src/midi/channel'
 import { encodeNrpn, nrpnBytes } from '../src/params/nrpn'
 import { type Patch, param } from '../src/params/patch'
 import { HydrasynthSession } from '../src/sysex/session'
@@ -27,7 +27,7 @@ export async function openSynth(file: string) {
   let held = -1
 
   /**
-   * Plays `patch` with `note` held `holdS`, sending `changes` [s after note-on, key, value]; the recording (in `file`) from note-on.
+   * Plays `patch` with `note` held `holdS`, sending `changes` [s after note-on, key, value] (key ccN: MIDI CC N); the recording (in `file`) from note-on.
    * `notes` [s after note-on, note, legato]: another note instead of the held one, overlapping it (legato) or after letting go.
    */
   async function take(
@@ -46,7 +46,11 @@ export async function openSynth(file: string) {
     session.sendRaw(noteOn(CHANNEL, note, 100))
     held = note
     const events = [
-      ...changes.map(([at, key, value]) => ({ at, run: () => nrpn(key, value) })),
+      // 'cc1' and the like: a controller (the Mod Wheel) instead of a parameter.
+      ...changes.map(([at, key, value]) => ({
+        at,
+        run: () => (/^cc\d+$/.test(key) ? session.sendRaw(controlChange(CHANNEL, Number(key.slice(2)), value)) : nrpn(key, value)),
+      })),
       ...notes.map(([at, next, legato]) => ({
         at,
         run: () => {

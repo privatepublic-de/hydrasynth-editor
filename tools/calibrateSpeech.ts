@@ -24,6 +24,8 @@
 //   speak <words> [saw|waves|fixed]  the speech patch (src/ui/speechPatch.ts) at C3, saved to local/speech-samples
 //   legato [words]   the speech patch in Mono, a second note overlapping the first halfway through (and
 //                    one after letting go): does the phrase go on, or start again? Per LFO Trig Sync
+//   freeze [words]   the sung speech patch frozen from 0.6 to 2.6 s by the Freeze macro, by the Mod Wheel,
+//                    and by the Mod Wheel with legato notes while frozen: level per 50 ms against none
 //   sources          each vowel at C2/C3/C4 from a Saw or from its matched wave (src/ui/waveSpeech.ts),
 //                    through the Vowel filter or not: how often it reads as the right vowel
 // The patches carry the ETCD marker, without which the synth ignores LFO steps 9-64.
@@ -536,6 +538,31 @@ ${Object.keys(pairs)
       const again = corr(after, base.slice(5))
       console.log(`${v.label}: after the second note at ${change} s, like the phrase going on ${on.toFixed(2)}, like it starting again ${again.toFixed(2)}`)
       copyFileSync(FILE, `local/speech-samples/legato-${words.replace(/\W+/g, '-')}-${v.label}.wav`)
+    }
+  } else if (experiment === 'freeze') {
+    const words = arg ?? 'how now brown cow'
+    const dictionary = parsePronunciations(readFileSync('public/pronunciations.txt', 'utf8'))
+    const s = buildSpeechPatch(words, { dictionary, sing: true })!
+    const hold = s.ms / 1000 + 2.6
+    const trace = (x: Float64Array) =>
+      Array.from({ length: Math.ceil(hold * 20) }, (_, i) => {
+        let e = 0
+        for (let j = 0; j < RATE / 20; j++) e += (x[i * (RATE / 20) + j] ?? 0) ** 2
+        return ' .:-=+*#%@'[Math.max(0, Math.min(9, Math.round((10 * Math.log10(e / (RATE / 20) + 1e-12) + 60) / 6)))]
+      }).join('')
+    const takes: [string, [number, string, number][], [number, number, boolean][]][] = [
+      ['none', [], []],
+      ['macro', [[0.6, 'macro5panelvalue', 1024], [2.6, 'macro5panelvalue', 0]], []],
+      ['wheel', [[0.6, 'cc1', 127], [2.6, 'cc1', 0]], []],
+      ['wheel-legato', [[0.6, 'cc1', 127], [2.6, 'cc1', 0]], [[1.2, 52, true], [1.8, 55, true], [2.4, 60, true]]],
+    ]
+    console.log(`${words}: ${s.ms} ms; 50 ms per char, frozen 0.6-2.6 s`)
+    mkdirSync('local/speech-samples', { recursive: true })
+    for (const [label, changes, notes] of takes) {
+      const x = await take(s.patch, 48, hold, changes, notes)
+      console.log(`${trace(x)} ${label}`)
+      if (label !== 'none') for (const t of [0.8, 1.6, 2.4]) console.log(`  ${t} s ${bandBar(x, Math.round(t * RATE))}`)
+      copyFileSync(FILE, `local/speech-samples/freeze-${words.replace(/\W+/g, '-')}-${label}.wav`)
     }
   } else if (experiment === 'sources') {
     const levels = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves.map((w: { cycle: string }) =>

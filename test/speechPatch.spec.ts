@@ -87,6 +87,18 @@ describe('buildSpeechPatch', () => {
     expect(step(world, 2, 64)).toBe(0)
   })
 
+  it('has a Freeze macro, also on the Mod Wheel, that pulls every LFO rate to the bottom', () => {
+    const s = buildSpeechPatch('hello world', { sing: true })!
+    expect(s.patch.get('macro5panelvalue')).toBe(0)
+    for (let i = 1; i <= 5; i++) {
+      expect(show(s, `macro5target${i}`)).toBe(`LFO ${i} Rate`)
+      expect(s.patch.get(`macro5depth${i}`)).toBe(0) // -128
+    }
+    expect(show(s, 'modmatrix10modsource')).toBe('Mod Wheel')
+    expect(show(s, 'modmatrix10modtarget')).toBe('Macro 5')
+    expect(s.patch.get('modmatrix10depth')).toBe(1024)
+  })
+
   it('has Speed (LFO rates), Fundamental (OSC 3 with the voicing), Voice (Formant Control) and Whisper (breath for voice) macros', () => {
     const s = buildSpeechPatch('hello world')!
     expect(s.patch.macroName(1)).toBe('Speed')
