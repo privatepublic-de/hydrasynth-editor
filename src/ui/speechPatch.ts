@@ -79,6 +79,47 @@ const HISS: Record<string, { noise: number; hz: number; voice: number }> = {
   th: { noise: 55, hz: 6500, voice: 0 },
   dh: { noise: 20, hz: 6500, voice: 70 },
 }
+/** Where in the mouth a consonant is made: it bends the formants of the vowels next to it. */
+type Place = 'lips' | 'teeth' | 'ridge' | 'palate' | 'velum'
+const PLACE: Record<string, Place> = {
+  b: 'lips', p: 'lips', m: 'lips', f: 'lips', v: 'lips',
+  th: 'teeth', dh: 'teeth',
+  d: 'ridge', t: 'ridge', n: 'ridge', s: 'ridge', z: 'ridge',
+  sh: 'palate', zh: 'palate', ch: 'palate', jh: 'palate',
+  k: 'velum', g: 'velum', ng: 'velum',
+}
+const NASAL_PLACES = { m: 1, n: 1, ng: 1 }
+/** Formant Control (raw, from 512) on the voiced parts of b and m next to a vowel: lips lower every formant. */
+const LIPS_CONTROL = -64
+/** A stop's burst strength by place (times the tuning's burst level). */
+const BURST_BY_PLACE: Record<Place, number> = { lips: 0.7, teeth: 1, ridge: 1.2, palate: 1.1, velum: 1.2 }
+/** Where F2 heads at each place (Hz, the "locus" of acoustic phonetics); the velum's depends on the vowel. */
+const LOCUS_F2: Record<Exclude<Place, 'velum'>, number> = { lips: 800, teeth: 1400, ridge: 1800, palate: 2100 }
+
+/**
+ * Where a vowel at AEIOU Cutoff `vowel` starts or ends next to a consonant made at `place`: its
+ * F1 lower (every closure lowers it) and F2 `pull` of the way toward the place's locus (the velum's: up
+ * toward ~2300 Hz before front vowels, unchanged before back ones). The nearest point of the
+ * AEIOU sweep that a glide from the vowel reaches without passing another vowel (offPath).
+ */
+export function locusPos(vowel: number, place: Place, pull = 0.5): number {
+  const [f1, f2] = formantsAt('AEIOU', vowel)
+  const toward = place === 'velum' ? (f2 > Math.log(1500) ? Math.log(2300) : f2) : Math.log(LOCUS_F2[place])
+  const [t1, t2] = [f1 + Math.log(0.7), f2 + pull * (toward - f2)]
+  let best = vowel
+  let bestD = Infinity
+  for (let c = 0; c <= 1024; c += 16) {
+    if (offPath('AEIOU', vowel, c)) continue
+    // Closed lips lower F1 too: a point that raises it (toward A, from a front vowel) is no help.
+    if (place === 'lips' && formantsAt('AEIOU', c)[0] > f1 + 1e-9) continue
+    const [g1, g2] = formantsAt('AEIOU', c)
+    // F2 tells the places apart; F1 (lowered at every closure) counts a quarter.
+    const d = 0.25 * (g1 - t1) ** 2 + (g2 - t2) ** 2
+    if (d < bestD) [bestD, best] = [d, c]
+  }
+  return best
+}
+
 /** Stops: a closure (voiced ones murmur through it), then a burst of noise at their place. */
 const STOP: Record<string, { voiced: boolean; hz: number; then?: string }> = {
   p: { voiced: false, hz: 1000 },
@@ -107,6 +148,11 @@ interface Segment {
   control: number
   /** A vowel (or half of a diphthong). */
   vowel: boolean
+  /**
+   * A consonant's part that leans on its vowel (the one before or after, in the same word): its
+   * place is where that vowel's formants start or end next to this consonant (locusPos).
+   */
+  locus?: { place: Place; side: 'prev' | 'next' }
 }
 
 /**
@@ -170,12 +216,21 @@ export interface Tuning {
   vowelControls: Partial<Record<string, number>>
   /** Voice level (0..128) per vowel, where it isn't the full 128. */
   vowelLevels: Partial<Record<string, number>>
+  /** How far (0..1) a vowel's F2 bends toward a consonant's locus next to it (locusPos). */
+  locusPull: number
+  /**
+   * The ay of "bay" (Filter 1 Cutoff, raw): from a close e (E itself) a short way toward i. Built
+   * from eh to ee, it slid across the whole front of the filter and slurred after a stop.
+   */
+  eyStart: number
+  eyEnd: number
 }
 /**
  * Chosen by ear from tools/tuneSpeech.ts runs: longer vowel glides scored smoother still (160 ms:
  * 10 % of frames still against 40 % before), but blur the vowels; 70 ms sounded better. Longer
  * m n l r w y, stops, word gaps and hiss delays scored closer to the references and sounded
  * better; shorter vowels scored better only by holding still less. r by ear between I and O.
+ * No Analog Feel drift: it scored as livelier, but its pitch wander made speech sound slurred.
  */
 export const TUNING: Tuning = {
   tempo: 1.4,
@@ -185,7 +240,7 @@ export const TUNING: Tuning = {
   pitchGlideMs: 120,
   vibrato: 0,
   vibratoRate: 100,
-  drift: 60,
+  drift: 0,
   stressedLength: 1,
   unstressedLength: 1,
   stopLength: 1.2,
@@ -194,13 +249,16 @@ export const TUNING: Tuning = {
   gapMs: 80,
   hissDelayMs: 60,
   burst: 85,
-  voicedBurst: 45,
-  closureVoice: 45,
+  voicedBurst: 70,
+  closureVoice: 30,
   hissLevel: 1,
   breath: 55,
   rPosition: between(I, O, 0.5),
   vowelControls: { ae: 64, er: 64 },
   vowelLevels: { er: 96 },
+  locusPull: 0.75,
+  eyStart: E,
+  eyEnd: between(E, I, 0.5),
   vowelPositions: {},
 }
 
@@ -247,10 +305,19 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
       // A diphthong has time on both ends, a little more where it glides to: either is easily lost.
       const control = (v: string) => tune.vowelControls[v] ?? 0
       const voice = (v: string) => tune.vowelLevels[v] ?? 128
-      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: posOf(v), voice: voice(v), pitch, shape: v, control: control(v), vowel: true }))
+      if (s === 'ey')
+        // Its own narrow glide, mostly on the start (waves: those of eh and ih).
+        (['eh', 'ih'] as const).forEach((v, i) =>
+          seg(v, ms * (i ? 0.4 : 0.6), { pos: i ? tune.eyEnd : tune.eyStart, voice: voice(v), pitch, shape: v, control: control(v), vowel: true }),
+        )
+      else if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: posOf(v), voice: voice(v), pitch, shape: v, control: control(v), vowel: true }))
       else seg(s, ms, { pos: posOf(s), voice: voice(s), pitch, shape: s, control: control(s), vowel: true })
     } else if (s === 'm' || s === 'n' || s === 'ng') {
-      seg(s, lengthOf(s), { pos: VOWEL_POS.uw, voice: 70, shape: s })
+      // A dark murmur, its edges where the vowels next to it start and end (m, n and ng differ there).
+      const ms = lengthOf(s)
+      seg(s, ms * 0.25, { voice: 70, shape: s, locus: { place: PLACE[s], side: 'prev' } })
+      seg(s, ms * 0.5, { pos: VOWEL_POS.uw, voice: 70, shape: s })
+      seg(s, ms * 0.25, { voice: 70, shape: s, locus: { place: PLACE[s], side: 'next' } })
     } else if (s === 'h') {
       // Breath fading in, not a burst; after a voiced sound still a little voiced, as between vowels.
       // It sounds through the mouth already shaped for the next vowel, so its band sits at that
@@ -263,16 +330,31 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
       seg(s, ms * 0.4, { noise: tune.breath * 0.35, band, voice })
       seg(s, ms * 0.6, { noise: tune.breath, band, voice: voice / 2 })
     } else if (s in HISS) {
-      seg(s, lengthOf(s), hiss(s))
+      // A voiceless one is silent in Filter 1, but the vowel after it glides out of its place.
+      seg(s, lengthOf(s), { ...hiss(s), ...(HISS[s].voice ? {} : { locus: { place: PLACE[s], side: 'next' } }) })
     } else if (s in STOP) {
       const st = STOP[s]
       const ms = lengthOf(s)
-      // Voiced stops murmur on through the closure, dark with the mouth shut, and release softly into
-      // the vowel; voiceless ones go quiet, then pop. Affricates end in their hiss.
+      // Voiced stops murmur on through the closure and release softly into the vowel; voiceless
+      // ones go quiet, then pop. Affricates end in their hiss.
+      // The vowel before ends, and the one after starts, where this stop's place puts them.
       const [closure, burst] = st.then ? [0.4, 0.15] : [0.7, 0.3]
-      seg(s, ms * closure, st.voiced ? { voice: tune.closureVoice, pos: VOWEL_POS.uw } : {})
-      seg(s, Math.max(15, ms * burst), { noise: st.voiced ? tune.voicedBurst : tune.burst, band: bandRaw(st.hz), voice: st.voiced ? 80 : 0 })
-      if (st.then) seg(st.then, ms * 0.45, hiss(st.then))
+      const place = PLACE[s]
+      seg(s, ms * closure * 0.5, st.voiced ? { voice: tune.closureVoice, locus: { place, side: 'prev' } } : { locus: { place, side: 'prev' } })
+      // A voiced stop's murmur leads into the vowel from the stop's own place, not from a dark U for
+      // all: b, d and g sounded alike.
+      seg(s, ms * closure * 0.5, st.voiced ? { voice: tune.closureVoice, locus: { place, side: 'next' } } : { locus: { place, side: 'next' } })
+      // A velar's burst sits near the next vowel's F2: high before front vowels, low before back ones.
+      let hz = st.hz
+      if (place === 'velum') {
+        const next = sounds.slice(n + 1).find((x) => x.sound in DIPHTHONGS || x.sound in VOWEL_POS)?.sound
+        const v = next ? (DIPHTHONGS[next]?.[0] ?? next) : 'ah'
+        hz = Math.exp(formantsAt('AEIOU', posOf(v))[1]) > 1500 ? 2500 : 1400
+      }
+      // Bursts differ by place: weak at the lips, strong at the ridge and the velum.
+      const strength = (st.voiced ? tune.voicedBurst : tune.burst) * BURST_BY_PLACE[place]
+      seg(s, Math.max(st.voiced ? 25 : 15, ms * burst), { noise: Math.min(128, strength), band: bandRaw(hz), voice: st.voiced ? 80 : 0, locus: { place, side: 'next' } })
+      if (st.then) seg(st.then, ms * 0.45, { ...hiss(st.then), locus: { place, side: 'next' } })
     }
   }
   // Nothing sounds before the first or after the last voiced or hissed segment.
@@ -283,6 +365,21 @@ function segmentsOf(text: string, dictionary: Pronunciations | null | undefined,
   // A phrase's last vowel lasts longer, stressed or not ("very": its ee was gone in the glides).
   const lastVowel = out.map((s) => s.vowel).lastIndexOf(true)
   if (lastVowel >= 0) out[lastVowel].ms = Math.max(out[lastVowel].ms, lengthOf(out[lastVowel].sound, true)) * 1.3
+  // Consonant parts that lean on a vowel of their word go where its formants start or end next to them.
+  out.forEach((c, i) => {
+    if (!c.locus) return
+    const step = c.locus.side === 'next' ? 1 : -1
+    for (let j = i + step; j >= 0 && j < out.length && out[j].sound !== ''; j += step)
+      if (out[j].vowel) {
+        c.pos = locusPos(out[j].pos!, c.locus.place, tune.locusPull)
+        // Closed lips lower all formants: where no noise needs LFO 4 (a b's closure, an m's
+        // edges), Formant Control dips too.
+        if (c.locus.place === 'lips' && !c.noise) c.control = LIPS_CONTROL
+        return
+      }
+    // No vowel that side: a nasal stays dark; the rest take the vowel after them, as before.
+    if (c.sound in NASAL_PLACES) c.pos = VOWEL_POS.uw
+  })
   // Consonants take the formants of the vowel after them (or before, at the end).
   let next = VOWEL_POS.ah
   for (let i = out.length - 1; i >= 0; i--) if (out[i].pos === null) out[i].pos = next; else next = out[i].pos!
@@ -442,15 +539,17 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     end: number
     /** Changes from a to b that jump (in one step) instead of gliding. */
     jump?: (a: number, b: number) => boolean
+    /** Changes into or out of a stop glide in one step: a stop is crisp, a long glide slurs it. */
+    crisp?: boolean
   }[] = [
     // Filt 1 Cutoff. The Vowel filter morphs only along its order's vowels: a glide that passes one
     // off its way says it ("very" as "ve-ee-ry"), so such a change jumps.
-    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, jump: (a, b) => offPath(order.name, 512 + 8 * a, 512 + 8 * b) },
-    { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0 }, // Osc 1 Vol
+    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, jump: (a, b) => offPath(order.name, 512 + 8 * a, 512 + 8 * b), crisp: true },
+    { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0, crisp: true }, // Osc 1 Vol
     { target: 77, depth: 1024, value: (s) => s.noise / 2, glideMs: tune.noiseGlideMs, end: 0 }, // Noise Vol
     // Filt 2 Cutoff while noise sounds; while it doesn't, Filter 2 hears nothing and the same curve
     // carries Formant Control (slot 7, depth CONTROL_DEPTH) for the vowels that need it.
-    { target: 96, depth: 768, value: (s) => (s.noise ? (s.band - 512) / 8 : (s.control * 8) / CONTROL_DEPTH), glideMs: tune.noiseGlideMs, end: 0 },
+    { target: 96, depth: 768, value: (s) => (s.noise ? (s.band - 512) / 8 : (s.control * 8) / CONTROL_DEPTH), glideMs: Math.max(tune.noiseGlideMs, 1), end: 0 },
     list
       ? // Osc 1 WaveScan: the sound's slot (slot i of 8 sits at i/7 of the range). One step's glide
         // at most: a longer ramp would play the slots between, other sounds' waves.
@@ -471,10 +570,15 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     p.set(`${lfo}smooth`, c.glideMs > 0 ? 127 : 0)
     // One value per step, then the end; ramps between sounds over `width` steps (the end stays exact).
     const values: number[] = []
+    const atStop: boolean[] = []
     segments.forEach((s, n) => {
-      for (let k = 0; k < t.counts[n]; k++) values.push(c.value(s, values.length))
+      for (let k = 0; k < t.counts[n]; k++) {
+        values.push(c.value(s, values.length))
+        atStop.push(s.sound in STOP)
+      }
     })
     values.push(c.end)
+    atStop.push(false)
     const width = Math.max(1, Math.round(c.glideMs / t.stepMs))
     const ramped = values.map((_, k) => {
       if (k === values.length - 1 || width === 1) return values[k]
@@ -484,9 +588,9 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
       for (let j = from; j <= to; j++) sum += values[j]
       return sum / (to - from + 1)
     })
-    if (c.jump)
+    if (c.jump || c.crisp)
       for (let b = 1; b < values.length - 1; b++)
-        if (values[b] !== values[b - 1] && c.jump(values[b - 1], values[b]))
+        if (values[b] !== values[b - 1] && (c.jump?.(values[b - 1], values[b]) || (c.crisp && (atStop[b - 1] || atStop[b]))))
           for (let k = Math.max(0, b - Math.ceil((width - 1) / 2)); k <= Math.min(values.length - 2, b + Math.floor((width - 1) / 2)); k++) ramped[k] = values[k]
     ramped.forEach((v, k) => p.set(`${lfo}step${k + 1}`, stepRaw(v)))
     for (let step = ramped.length + 1; step <= STEPS; step++) p.set(`${lfo}step${step}`, 512)
