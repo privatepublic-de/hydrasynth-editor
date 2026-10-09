@@ -490,7 +490,7 @@ ${Object.keys(pairs)
       console.log(`${String(t).padStart(4)} ms ${bandBar(x, Math.round((t / 1000) * RATE))} cutoff ${512 + plan(1) * 8} voice ${plan(2) * 2} noise ${plan(3) * 2}`)
     }
     mkdirSync('local/speech-samples', { recursive: true })
-    const out = `local/speech-samples/${arg.replace(/\?/g, ' Q').trim().replace(/\W+/g, '-')}${process.argv[4] === 'fixed' ? '-fixed' : withWaves ? '-waves' : '-saw'}${process.env.SUFFIX ?? ''}.wav`
+    const out = `local/speech-samples/${arg.replace(/\?/g, ' Q').replace(/!/g, ' X').replace(/\./g, ' P').trim().replace(/\W+/g, '-')}${process.argv[4] === 'fixed' ? '-fixed' : withWaves ? '-waves' : '-saw'}${process.env.SUFFIX ?? ''}.wav`
     copyFileSync(FILE, out)
     console.log('saved', out)
   } else if (experiment === 'sources') {
