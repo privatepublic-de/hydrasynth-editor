@@ -223,9 +223,80 @@ function spellWord(w: string): string[] {
 }
 
 /** The speech sounds (ARPAbet-like codes) of some English words, '' between words. */
-export function spellSounds(text: string): string[] {
-  const words = text.toLowerCase().replace(/[^a-z' ]/g, ' ').replace(/'/g, '').split(/\s+/).filter(Boolean)
-  return words.flatMap((w, n) => [...(n ? [''] : []), ...spellWord(w)])
+export function spellSounds(text: string, dictionary?: Pronunciations | null): string[] {
+  return pronounce(text, dictionary).map((s) => s.sound)
+}
+
+/** A speech sound and whether it carries the word's stress (only vowels do). */
+export interface Sound {
+  sound: string
+  stressed: boolean
+}
+
+/**
+ * One character per sound in public/pronunciations.txt (tools/buildPronunciations.ts): vowels as
+ * a..o, in capitals when stressed; consonants as the rest.
+ */
+export const PRONUNCIATION_CODES: Record<string, string> = Object.fromEntries(
+  [
+    ...['aa', 'ae', 'ah', 'ao', 'aw', 'ay', 'eh', 'er', 'ey', 'ih', 'iy', 'ow', 'oy', 'uh', 'uw'].map((v, i) => [v, 'abcdefghijklmno'[i]]),
+    ...['b', 'ch', 'd', 'dh', 'f', 'g', 'h', 'jh', 'k', 'l', 'm', 'n', 'ng', 'p', 'r', 's', 'sh', 't', 'th', 'v', 'w', 'y', 'z', 'zh'].map((c, i) => [
+      c,
+      'pqrstuvwxyz0123456789#%&'[i],
+    ]),
+  ],
+)
+const SOUND_OF = new Map(Object.entries(PRONUNCIATION_CODES).map(([sound, c]) => [c, sound]))
+
+/** Word -> its sounds as coded in public/pronunciations.txt. */
+export type Pronunciations = Map<string, string>
+
+/** Reads public/pronunciations.txt: front-coded lines, a digit of letters shared with the line before. */
+export function parsePronunciations(text: string): Pronunciations {
+  const out: Pronunciations = new Map()
+  let previous = ''
+  for (const line of text.split('\n')) {
+    if (!line) continue
+    const space = line.indexOf(' ')
+    const word = previous.slice(0, Number(line[0])) + line.slice(1, space)
+    out.set(word, line.slice(space + 1))
+    previous = word
+  }
+  return out
+}
+
+let pronunciations: Promise<Pronunciations | null> | null = null
+/** The CMU Pronouncing Dictionary (see NOTICE), loaded once on first use; null if it didn't load. */
+export const loadPronunciations = () =>
+  (pronunciations ??= fetch(`${import.meta.env.BASE_URL}pronunciations.txt`)
+    .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
+    .then(parsePronunciations)
+    .catch(() => null))
+
+const decode = (code: string): Sound[] =>
+  [...code].map((c) => ({ sound: SOUND_OF.get(c.toLowerCase())!, stressed: /[A-O]/.test(c) }))
+
+/**
+ * The sounds of some English words, '' between words: from the dictionary where it has the word,
+ * else from the spelling rules above (stress on the word's first vowel).
+ */
+export function pronounce(text: string, dictionary?: Pronunciations | null): Sound[] {
+  const words = text.toLowerCase().replace(/[^a-z' ]/g, ' ').split(/\s+/).map((w) => w.replace(/^'+|'+$/g, '')).filter(Boolean)
+  return words.flatMap((w, n) => {
+    const known = dictionary?.get(w)
+    let sounds: Sound[]
+    if (known) sounds = decode(known)
+    else {
+      let first = true
+      sounds = spellWord(w.replace(/'/g, '')).map((sound) => {
+        const vowel = /^[aeiou]/.test(sound)
+        const stressed = vowel && first
+        if (vowel) first = false
+        return { sound, stressed }
+      })
+    }
+    return [...(n ? [{ sound: '', stressed: false }] : []), ...sounds]
+  })
 }
 
 /** Correlation of two level curves; `flat` first takes out each one's overall tilt, leaving its peaks. */
@@ -324,10 +395,10 @@ const PRIORITY: Record<Kind | 'gap', number> = { vowel: 3, glide: 2, nasal: 2, h
  * Eight slots that say `text` when WaveScan sweeps through them, tuned for notes around `f0` Hz.
  * `levels`: harmonicLevels per wave. Null if the text has nothing to say.
  */
-export function speakWavelist(text: string, levels: (number[] | null)[], f0 = 130.81): Speech | null {
+export function speakWavelist(text: string, levels: (number[] | null)[], f0 = 130.81, dictionary?: Pronunciations | null): Speech | null {
   // The voiced sounds in order; stops and word gaps both become Silence.
   let units: { sound: string; priority: number }[] = []
-  for (const s of spellSounds(text)) {
+  for (const s of spellSounds(text, dictionary)) {
     if (s === '') units.push({ sound: '', priority: PRIORITY.gap })
     else if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, n) => units.push({ sound: v, priority: n ? 2.5 : 3 }))
     else {

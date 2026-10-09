@@ -22,7 +22,7 @@ import { encodeNrpn, nrpnBytes } from '../src/params/nrpn'
 import { Patch, param } from '../src/params/patch'
 import { HydrasynthSession } from '../src/sysex/session'
 import { buildSpeechPatch, CALIBRATION, VOWEL_POS } from '../src/ui/speechPatch'
-import { FORMANTS, formantLevels, harmonicLevels, similarity, waveFor } from '../src/ui/waveSpeech'
+import { FORMANTS, formantLevels, harmonicLevels, parsePronunciations, similarity, waveFor } from '../src/ui/waveSpeech'
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { connectHelper } from './coremidiTransport'
 import { RATE, readWav } from './waveAudio'
@@ -353,7 +353,8 @@ try {
           harmonicLevels(Float32Array.from(new Int16Array(new Uint8Array(Buffer.from(w.cycle, 'base64')).buffer), (v) => v / 32767)),
         )
       : null
-    const s = buildSpeechPatch(arg, levels ? { waves: { levels, f0: 130.81 } } : {})!
+    const dictionary = parsePronunciations(readFileSync('public/pronunciations.txt', 'utf8'))
+    const s = buildSpeechPatch(arg, { dictionary, ...(levels ? { waves: { levels, f0: 130.81 } } : {}) })!
     console.log(`${arg}: ${s.sounds.join(' ')}, ${s.ms} ms${withWaves ? `, waves ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => formatValue(param(`osc1wavscanwave${n}`), s.patch.get(`osc1wavscanwave${n}`))).join(', ')}` : ''}`)
     const x = await take(s.patch, 48, s.ms / 1000 + 0.4)
     // What each 20 ms sounds like, against the planned Filter 1 Cutoff of that step.

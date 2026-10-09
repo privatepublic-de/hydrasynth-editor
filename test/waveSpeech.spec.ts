@@ -71,3 +71,24 @@ describe('speakWavelist', () => {
     expect(low).not.toEqual(high)
   })
 })
+
+describe('the pronunciation dictionary', async () => {
+  const { parsePronunciations, pronounce } = await import('../src/ui/waveSpeech')
+  const dictionary = parsePronunciations(readFileSync('public/pronunciations.txt', 'utf8'))
+
+  it('has the CMU words, front-coded lines decoded', () => {
+    expect(dictionary.size).toBeGreaterThan(120000)
+    expect(pronounce('voice', dictionary).map((s) => s.sound)).toEqual(['v', 'oy', 's'])
+    expect(pronounce('orange', dictionary).map((s) => s.sound)).toEqual(['ao', 'r', 'ah', 'n', 'jh'])
+  })
+
+  it('marks stressed vowels (primary and secondary): hel-LO, RO-bot', () => {
+    const stressed = (w: string) => pronounce(w, dictionary).filter((s) => s.stressed).map((s) => s.sound)
+    expect(stressed('hello')).toEqual(['ow'])
+    expect(stressed('robot')).toEqual(['ow', 'aa'])
+  })
+
+  it('falls back to the spelling rules for words it lacks', () => {
+    expect(pronounce('hydrasynth', dictionary).map((s) => s.sound)).toEqual(pronounce('hydrasynth').map((s) => s.sound))
+  })
+})

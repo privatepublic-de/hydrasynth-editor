@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { WAVE_FEATURES } from '../ui/waveFeatures.generated'
 import { buildSpeechPatch } from '../ui/speechPatch'
-import { PITCHES, waveLevels } from '../ui/waveSpeech'
+import { loadPronunciations, PITCHES, waveLevels, type Pronunciations } from '../ui/waveSpeech'
 import { useEditor } from './store'
 
 const SPEEDS = [
@@ -24,8 +24,12 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
   const [input, setInput] = useState(text)
   const [withWaves, setWithWaves] = useState(true)
   const [pitch, setPitch] = useState(1)
-  useEffect(() => ref.current?.showModal(), [])
-  const speech = buildSpeechPatch(input, { speed: SPEEDS[speed].speed })
+  const [dictionary, setDictionary] = useState<Pronunciations | null>(null)
+  useEffect(() => {
+    ref.current?.showModal()
+    void loadPronunciations().then(setDictionary)
+  }, [])
+  const speech = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary })
   const words = input.trim()
 
   const replace = async () => {
@@ -35,7 +39,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
     if (withWaves) {
       const levels = await waveLevels()
       if (levels.filter(Boolean).length < WAVE_FEATURES.length) return onDone("The wave data didn't load", input)
-      patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, waves: { levels, f0: PITCHES[pitch].hz } })!.patch
+      patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary, waves: { levels, f0: PITCHES[pitch].hz } })!.patch
     }
     void loadPatch(patch, `Speech patch “${words}”`)
     onDone(

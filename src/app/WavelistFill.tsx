@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { WAVE_FEATURES } from '../ui/waveFeatures.generated'
 import { FILL_STYLES, fillWavelist, type FillStyle } from '../ui/wavePopulate'
-import { PITCHES, speakWavelist, SILENCE, waveLevels } from '../ui/waveSpeech'
+import { loadPronunciations, PITCHES, speakWavelist, SILENCE, waveLevels } from '../ui/waveSpeech'
 import { SpeechPatchDialog } from './SpeechPatchDialog'
 import { useEditor } from './store'
 
@@ -35,7 +35,7 @@ export function WavelistFill({ osc }: { osc: number }) {
     if (style !== SPEECH) return write(`Fill OSC ${osc} wavelist`, fillWavelist(style, Math.random, patch.get(key(1))))
     const measured = await waveLevels()
     if (measured.filter(Boolean).length < WAVE_FEATURES.length) return setSaid("The wave data didn't load")
-    const speech = speakWavelist(text, measured, PITCHES[pitch].hz)
+    const speech = speakWavelist(text, measured, PITCHES[pitch].hz, await loadPronunciations())
     if (!speech) return setSaid('Nothing to say')
     write(`Speak "${text.trim()}" on OSC ${osc}`, speech.waves)
     setSaid(speech.sounds.map((s) => s || '·').join(' ') + (speech.dropped ? ` (${speech.dropped} sounds left out)` : ''))

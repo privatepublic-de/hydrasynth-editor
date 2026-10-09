@@ -15,7 +15,7 @@
 import { formatValue } from '../params/display'
 import { initPatchBytes } from '../params/initPatch'
 import { Patch, param } from '../params/patch'
-import { spellSounds, waveFor } from './waveSpeech'
+import { pronounce, waveFor, type Pronunciations } from './waveSpeech'
 
 /** What the synth showed when measured (tools/calibrateSpeech.ts), so the numbers can be checked again. */
 export const CALIBRATION = {
@@ -93,42 +93,57 @@ interface Segment {
   shape: string | null
 }
 
-const VOWEL_MS = 140
-function segmentsOf(text: string): Segment[] {
+/**
+ * How long eSpeak NG says each sound (ms; tools/espeak.ts durations, over 3,500 words of the
+ * CMU dictionary), vowels as [unstressed, stressed]. The synth needs longer than eSpeak to be
+ * understood, so all of it is stretched by TEMPO (set by ear: "voice" ~0.6 s).
+ */
+const LENGTHS: Record<string, number | [number, number]> = {
+  aa: [81, 152], ae: [76, 152], ah: [54, 134], ao: [73, 133], aw: [104, 188], ay: [89, 169], eh: [83, 148], er: [93, 171],
+  ey: [91, 160], ih: [66, 119], iy: [77, 134], ow: [96, 174], oy: [105, 205], uh: [48, 100], uw: [58, 129],
+  b: 41, ch: 70, d: 48, dh: 60, f: 79, g: 48, h: 60, jh: 63, k: 51, l: 56, m: 88, n: 83, ng: 98, p: 43, r: 71, s: 80,
+  sh: 94, t: 46, th: 83, v: 69, w: 105, y: 84, z: 87, zh: 64,
+}
+const TEMPO = 1.4
+const lengthOf = (sound: string, stressed = false) => {
+  const l = LENGTHS[sound] ?? 60
+  return TEMPO * (typeof l === 'number' ? l : l[stressed ? 1 : 0])
+}
+
+function segmentsOf(text: string, dictionary?: Pronunciations | null): Segment[] {
   const out: Segment[] = []
   const seg = (sound: string, ms: number, s: Partial<Segment> = {}) =>
     out.push({ sound, ms, pos: null, voice: 0, noise: 0, band: 512, pitch: 0, shape: null, ...s })
-  let stressed = true // the first vowel of each word
-  for (const s of spellSounds(text)) {
+  for (const { sound: s, stressed } of pronounce(text, dictionary)) {
     if (s === '') {
       seg('', 50)
-      stressed = true
     } else if (s in DIPHTHONGS || s in VOWEL_POS) {
       const glide = ['w', 'y', 'r', 'l'].includes(s)
       if (glide) {
-        seg(s, 65, { pos: VOWEL_POS[s], voice: 100, shape: s })
+        seg(s, lengthOf(s), { pos: VOWEL_POS[s], voice: 100, shape: s })
         continue
       }
       const pitch = stressed ? 1.5 : 0
-      const ms = stressed ? VOWEL_MS * 1.25 : VOWEL_MS
-      // A diphthong is a long vowel, with time on both ends: either is easily lost.
-      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.95 : 0.8), { pos: VOWEL_POS[v], voice: 128, pitch, shape: v }))
+      const ms = lengthOf(s, stressed)
+      // A diphthong has time on both ends, a little more where it glides to: either is easily lost.
+      if (s in DIPHTHONGS) DIPHTHONGS[s].forEach((v, i) => seg(v, ms * (i ? 0.55 : 0.45), { pos: VOWEL_POS[v], voice: 128, pitch, shape: v }))
       else seg(s, ms, { pos: VOWEL_POS[s], voice: 128, pitch, shape: s })
-      stressed = false
     } else if (s === 'm' || s === 'n' || s === 'ng') {
-      seg(s, 75, { pos: VOWEL_POS.uw, voice: 70, shape: s })
+      seg(s, lengthOf(s), { pos: VOWEL_POS.uw, voice: 70, shape: s })
     } else if (s === 'h') {
-      seg(s, 55, { noise: 55, band: bandRaw(1500) })
+      seg(s, lengthOf(s), { noise: 55, band: bandRaw(1500) })
     } else if (s in HISS) {
       const h = HISS[s]
-      seg(s, h.voice ? 85 : 105, { noise: h.noise, band: bandRaw(h.hz), voice: h.voice })
+      seg(s, lengthOf(s), { noise: h.noise, band: bandRaw(h.hz), voice: h.voice })
     } else if (s in STOP) {
       const st = STOP[s]
+      const ms = lengthOf(s)
       // Voiced stops murmur on through the closure, dark with the mouth shut, and release softly into
-      // the vowel; voiceless ones go quiet, then pop.
-      seg(s, 55, st.voiced ? { voice: 45, pos: VOWEL_POS.uw } : {})
-      seg(s, 20, { noise: st.voiced ? 45 : 85, band: bandRaw(st.hz), voice: st.voiced ? 80 : 0 })
-      if (st.then) seg(st.then, 60, { noise: HISS[st.then].noise, band: bandRaw(HISS[st.then].hz), voice: HISS[st.then].voice })
+      // the vowel; voiceless ones go quiet, then pop. Affricates end in their hiss.
+      const [closure, burst] = st.then ? [0.4, 0.15] : [0.7, 0.3]
+      seg(s, ms * closure, st.voiced ? { voice: 45, pos: VOWEL_POS.uw } : {})
+      seg(s, Math.max(15, ms * burst), { noise: st.voiced ? 45 : 85, band: bandRaw(st.hz), voice: st.voiced ? 80 : 0 })
+      if (st.then) seg(st.then, ms * 0.45, { noise: HISS[st.then].noise, band: bandRaw(HISS[st.then].hz), voice: HISS[st.then].voice })
     }
   }
   // Nothing sounds before the first or after the last voiced or hissed segment.
@@ -185,6 +200,8 @@ export interface SpeechPatchOptions {
   speed?: number
   /** Shape the voice with waves instead of the Saw: each wave's harmonicLevels, and the note (Hz) to tune them for. */
   waves?: { levels: (number[] | null)[]; f0: number }
+  /** How words are said (loadPronunciations); without it, or for words it lacks, the spelling rules. */
+  dictionary?: Pronunciations | null
 }
 
 /** Envelope times (raw -> ms) the synth offers, read from its own display table. */
@@ -222,8 +239,8 @@ function waveList(segments: Segment[], levels: (number[] | null)[], f0: number) 
 }
 
 /** The Init patch turned into a patch that says `text` on each note; null if there's nothing to say. */
-export function buildSpeechPatch(text: string, { speed = 1, waves }: SpeechPatchOptions = {}): SpeechPatch | null {
-  const all = segmentsOf(text)
+export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary }: SpeechPatchOptions = {}): SpeechPatch | null {
+  const all = segmentsOf(text, dictionary)
   // More segments than steps: say less (the end goes).
   const segments = all.slice(0, STEPS - 1)
   const dropped = all.length - segments.length
