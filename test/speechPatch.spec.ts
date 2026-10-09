@@ -40,8 +40,9 @@ describe('buildSpeechPatch', () => {
     // The last step: no voice, no noise.
     expect(step(s, 2, steps)).toBe(0)
     expect(step(s, 3, steps)).toBe(0)
-    // The phrase lasts its steps at the LFO rate (Hz per step).
-    const hz = parseFloat(show(s, 'lfo1ratesyncoff').replace(',', '.'))
+    // The phrase lasts its steps at the LFO rate (Hz per step), with the Speed macro in its middle
+    // adding 96 raw (knob 64/128 * depth 24/128 * 1024).
+    const hz = parseFloat(formatValue(param('lfo1ratesyncoff'), s.patch.get('lfo1ratesyncoff') + 96).replace(',', '.'))
     expect(s.ms).toBeCloseTo(((steps - 1) * 1000) / hz, -1)
   })
 
@@ -63,6 +64,20 @@ describe('buildSpeechPatch', () => {
     const long = buildSpeechPatch('the quick brown fox jumps over the lazy dog and keeps on running far away')!
     expect(long.dropped).toBeGreaterThan(0)
     expect(long.patch.get('lfo1steps')).toBe(64)
+  })
+
+  it('has a Speed macro on all five LFO rates, and a Fundamental macro fading in OSC 3 with the voicing', () => {
+    const s = buildSpeechPatch('hello world')!
+    expect(s.patch.macroName(1)).toBe('Speed')
+    expect(show(s, 'macro1panelvalue')).toBe('64,0')
+    expect([1, 2, 3, 4, 5].map((i) => show(s, `macro1target${i}`))).toEqual(['LFO 1 Rate', 'LFO 2 Rate', 'LFO 3 Rate', 'LFO 4 Rate', 'LFO 5 Rate'])
+    expect(new Set([1, 2, 3, 4, 5].map((i) => s.patch.get(`macro1depth${i}`))).size).toBe(1)
+    expect(s.patch.macroName(2)).toBe('Fundamental')
+    expect(show(s, 'macro2target1')).toBe('Matrix 8 Depth')
+    expect(show(s, 'modmatrix8modsource')).toBe('LFO 2')
+    expect(show(s, 'modmatrix8modtarget')).toBe('Osc 3 Vol')
+    expect(show(s, 'osc3type')).toBe('Saw')
+    expect(show(s, 'mixerosc3vol')).toBe('0,0')
   })
 
   describe('with waves', () => {

@@ -6,6 +6,9 @@
 //   LFO 3 -> Noise Vol       hiss, bursts of stops, h
 //   LFO 4 -> Filt 2 Cutoff   where the hiss sits: s high, sh lower, p/t/k bursts by place
 //   LFO 5 -> Osc 1 Pitch     intonation: stressed syllables up, the phrase falling
+// Macro 1 (Speed) moves all five LFOs' rates together, from ~0.43x to ~2.3x, normal in the middle;
+// Macro 2 (Fundamental) fades in OSC 3, a Saw at the note played that follows the voicing, for
+// melodic speech and chords.
 // ENV 2 (the Amp's) just gates the note; the last step is silent and a one-shot LFO holds it.
 // With `waves`, OSC 1 plays a WaveScan list of waves whose harmonics already show each sound's
 // formants at the note it's tuned for (src/ui/waveSpeech.ts) instead of the Saw; LFO 5 then steps
@@ -435,7 +438,8 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     p.set(`${lfo}wave`, 10)
     p.set(`${lfo}steps`, total + 1)
     p.set(`${lfo}bpmsync`, 0)
-    p.set(`${lfo}ratesyncoff`, t.raw)
+    // The Speed macro adds SPEED_CENTER back in its middle.
+    p.set(`${lfo}ratesyncoff`, Math.max(0, t.raw - SPEED_CENTER))
     p.set(`${lfo}oneshot`, 1)
     p.set(`${lfo}trigsync`, 0)
     p.set(`${lfo}level`, 1024)
@@ -485,16 +489,49 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     p.set('env3holdsyncoff', 0)
     p.set('env3sustain', 0)
     const decayMs = (total * t.stepMs) / CALIBRATION.decayFactor
-    p.set('env3decaysyncoff', DECAYS.reduce((a, b) => (Math.abs(b[1] - decayMs) < Math.abs(a[1] - decayMs) ? b : a))[0])
+    const decay = DECAYS.reduce((a, b) => (Math.abs(b[1] - decayMs) < Math.abs(a[1] - decayMs) ? b : a))[0]
+    // The Speed macro shortens the fall as it speeds the phrase up (both tables ~x1.7 per 64 raw).
+    p.set('env3decaysyncoff', Math.min(1024, decay + SPEED_CENTER))
+    p.set('macro1target6', 131) // Env 3 Decay
+    p.set('macro1depth6', 512 - SPEED_DEPTH * 4)
     p.set('modmatrix6modsource', 3) // Env 3
     p.set('modmatrix6modtarget', 11) // Osc 1 Pitch
     p.set('modmatrix6depth', Math.round(512 + ((fall * PER_SEMITONE * 128) / 64) * 4))
   }
 
+  // Macro 1, Speed: every LFO's Rate by the same amount, so they stay together; the knob's middle
+  // (its default) is the phrase as built. A route moves a target by knob/128 * depth/128 * 1024
+  // raw (tools/calibrateSpeech.ts macrorate).
+  p.setMacroName(1, 'Speed')
+  p.set('macro1panelvalue', 512)
+  for (let i = 1; i <= 5; i++) {
+    p.set(`macro1target${i}`, 142 + 2 * i) // LFO i Rate
+    p.set(`macro1depth${i}`, 512 + SPEED_DEPTH * 4)
+  }
+  // Macro 2, Fundamental: OSC 3, a Saw at the note played, through the Vowel filter with the voice
+  // and following its voicing: the voicing curve (LFO 2) goes to Osc 3 Vol at depth 0 (slot 8),
+  // and the macro turns that depth up, to +128 at the top (64 of 128 on a Matrix Depth, whose
+  // range is twice that). Off at 0.
+  p.setMacroName(2, 'Fundamental')
+  p.set('osc3type', 3)
+  p.set('osc3semi', 0)
+  p.set('mixerosc3vol', 0)
+  p.set('mixerosc3filterratio', 0)
+  p.set('modmatrix8modsource', 7) // LFO 2
+  p.set('modmatrix8modtarget', 75) // Osc 3 Vol
+  p.set('modmatrix8depth', 512)
+  p.set('macro2panelvalue', 0)
+  p.set('macro2target1', 161) // Matrix 8 Depth
+  p.set('macro2depth1', 512 + 64 * 4)
+
   // A stop's closure and burst are one sound.
   const sounds = segments.map((s) => s.sound).filter((s, i, all) => !(s in STOP && all[i - 1] === s))
   return { patch: p, sounds, ms: Math.round(total * t.stepMs), dropped, order: order.name }
 }
+
+/** Depth (of 128) of the Speed macro on the LFO rates: 192 raw over the knob, 96 to either side of the middle. */
+const SPEED_DEPTH = 24
+const SPEED_CENTER = SPEED_DEPTH * 4
 
 /** Depth (of 128) of LFO 4's route to Formant Control. */
 const CONTROL_DEPTH = 16

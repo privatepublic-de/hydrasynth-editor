@@ -10,6 +10,10 @@
 //   control          Saw through the Vowel filter at Cutoffs 0..192 (A to between A and E) and Formant
 //                    Controls 384..896: formant peaks per pair, to find the a of cat (F1 ~680, F2 ~1800)
 //   controlroute     a Step LFO on Filt 1 Control (depth 128) at A: steps 0, 16, 32, 64, one second each
+//   macrorate        Macro 1 on LFO 1 Rate (depth 32) at knob 0, 64 and 128: how fast a step LFO
+//                    then runs (a Sine stepped up and down in pitch), from steps per second
+//   macrodepth       Macro 1 on a route's depth (Matrix 1 Depth, macro depth 64): a full-level Step
+//                    LFO into Osc 1 Vol at route depth 0, knob 0, 64 and 128, against static volumes
 //   morphs           the Vowel filter's sound between every pair of its vowels (four orders cover
 //                    all ten pairs), Cutoff in steps of 32: src/ui/vowelMorphs.generated.ts
 //   positions        Saw through the Vowel filter, Cutoff in steps of 32: the best Cutoff per vowel
@@ -256,6 +260,57 @@ try {
     stepLfo(p, steps, 91, 1024)
     const x = await take(p, 36, steps.length)
     steps.forEach((v, i) => console.log(`step ${String(v).padStart(3)}: ${formants(x, Math.round((i + 0.3) * RATE))}`))
+  } else if (experiment === 'macrorate') {
+    for (const knob of [0, 512, 1024]) {
+      const p = initPatch()
+      p.set('osc1type', 0)
+      p.set('lfo1wave', 10)
+      p.set('lfo1steps', 2)
+      p.set('lfo1step1', 512)
+      p.set('lfo1step2', 512 + 20 * 8)
+      p.set('lfo1ratesyncoff', 640) // 5.28 Hz
+      p.set('lfo1oneshot', 0)
+      p.set('modmatrix1modsource', 6)
+      p.set('modmatrix1modtarget', 11)
+      p.set('modmatrix1depth', 1024)
+      p.set('macro1target1', 144) // LFO 1 Rate
+      p.set('macro1depth1', 512 + 32 * 4)
+      p.set('macro1panelvalue', knob)
+      const x = await take(p, 72, 3)
+      // Pitch every 5 ms; a step change is a jump of the frequency up or down.
+      let changes = 0
+      let last = frequency(x, Math.round(0.3 * RATE), 240)
+      for (let t = 0.305; t < 2.8; t += 0.005) {
+        const f = frequency(x, Math.round(t * RATE), 240)
+        if (Math.abs(12 * Math.log2(f / last)) > 2) changes++
+        last = f
+      }
+      console.log(`knob ${knob / 8}: ${(changes / 2.5).toFixed(2)} steps a second (unmodulated: 5.28)`)
+    }
+  } else if (experiment === 'macrodepth') {
+    const level = (x: Float64Array) => {
+      let e = 0
+      const [a, b] = [Math.round(0.4 * RATE), Math.round(1.2 * RATE)]
+      for (let i = a; i < b; i++) e += x[i] * x[i]
+      return 20 * Math.log10(Math.sqrt(e / (b - a)) + 1e-9)
+    }
+    for (const knob of [0, 512, 1024]) {
+      const p = initPatch()
+      p.set('mixerosc1vol', 0)
+      stepLfo(p, [64, 64], 73, 512) // full level into Osc 1 Vol, route at depth 0
+      p.set('lfo1oneshot', 0)
+      p.set('macro1target1', 154) // Matrix 1 Depth
+      p.set('macro1depth1', 512 + 64 * 4)
+      p.set('macro1panelvalue', knob)
+      const x = await take(p, 48, 1.4)
+      console.log(`knob ${knob / 8}: ${level(x).toFixed(1)} dB`)
+    }
+    for (const v of [1024, 512]) {
+      const p = initPatch()
+      p.set('mixerosc1vol', v)
+      const x = await take(p, 48, 1.4)
+      console.log(`static Osc 1 Vol ${v / 8}: ${level(x).toFixed(1)} dB`)
+    }
   } else if (experiment === 'morphs') {
     // Each order puts the same five vowels at 0, 256, .. 1024 in its own sequence; between two
     // neighbours the filter morphs. AEIOU, AIUEO, AUIOE and AOUIE have all ten pairs between them.
