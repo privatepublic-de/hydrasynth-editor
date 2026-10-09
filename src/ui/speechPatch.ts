@@ -15,6 +15,7 @@
 import { formatValue } from '../params/display'
 import { initPatchBytes } from '../params/initPatch'
 import { Patch, param } from '../params/patch'
+import { VOWEL_MORPHS } from './vowelMorphs.generated'
 import { pronounce, waveFor, type Pronunciations } from './waveSpeech'
 
 /** What the synth showed when measured (tools/calibrateSpeech.ts), so the numbers can be checked again. */
@@ -286,6 +287,8 @@ export interface SpeechPatch {
   ms: number
   /** Sounds left out: more than the 63 steps hold. */
   dropped: number
+  /** The Vowel filter's order for this phrase (see chooseOrder). */
+  order: string
 }
 
 export interface SpeechPatchOptions {
@@ -358,7 +361,6 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   p.set('mixerosc1filterratio', 0)
   p.set('mixernoisefilterratio', 1024)
   p.set('filter1type', 10)
-  p.set('filter1vowelorder', 0)
   p.set('filter1special', 512)
   p.set('filter1resonance', 576)
   p.set('filter1keytrack', 512)
@@ -382,6 +384,13 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
 
   // The five curves, one value per segment, then a silent hold.
   const total = t.counts.reduce((a, b) => a + b, 0)
+  // The vowel order that lets this phrase glide where it should; positions move into it.
+  const order = chooseOrder(
+    segments.map((s) => s.pos!),
+    segments.map((s) => s.voice >= 100),
+  )
+  for (const s of segments) s.pos = order.place.get(s.pos!)!
+  p.set('filter1vowelorder', ORDERS.indexOf(order.name))
   const list = waves ? waveList(segments, waves.levels, waves.f0) : null
   /**
    * Each curve moves between sounds in a ramp `glideMs` long, written into the steps (a moving
@@ -397,9 +406,9 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     /** Changes from a to b that jump (in one step) instead of gliding. */
     jump?: (a: number, b: number) => boolean
   }[] = [
-    // Filt 1 Cutoff. The Vowel filter morphs only along A E I O U: a glide that passes one of them
-    // on the way says it ("very" as "ve-ee-ry"), so such a change jumps.
-    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, jump: passesVowel },
+    // Filt 1 Cutoff. The Vowel filter morphs only along its order's vowels: a glide that passes one
+    // off its way says it ("very" as "ve-ee-ry"), so such a change jumps.
+    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, jump: (a, b) => offPath(order.name, 512 + 8 * a, 512 + 8 * b) },
     { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0 }, // Osc 1 Vol
     { target: 77, depth: 1024, value: (s) => s.noise / 2, glideMs: tune.noiseGlideMs, end: 0 }, // Noise Vol
     { target: 96, depth: 768, value: (s) => (s.band - 512) / 8, glideMs: tune.noiseGlideMs, end: 0 }, // Filt 2 Cutoff
@@ -469,20 +478,112 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
 
   // A stop's closure and burst are one sound.
   const sounds = segments.map((s) => s.sound).filter((s, i, all) => !(s in STOP && all[i - 1] === s))
-  return { patch: p, sounds, ms: Math.round(total * t.stepMs), dropped }
+  return { patch: p, sounds, ms: Math.round(total * t.stepMs), dropped, order: order.name }
+}
+
+/** The Vowel Order choices (filter1vowelorder 0..7): the five vowels at Cutoff 0, 256, .. 1024 in this sequence. */
+const ORDERS = ['AEIOU', 'AIUEO', 'AUIOE', 'AOUIE', 'IOUAE', 'UEAOI', 'IOEAU', 'UIEAO']
+/** F1 and F2 (Hz) of the five vowels (tools/calibrateSpeech.ts vowel; between them they morph about straight). */
+const VOWEL_FORMANTS: Record<string, [number, number]> = { A: [719, 1177], E: [458, 2093], I: [262, 2485], O: [458, 785], U: [262, 589] }
+
+/** Where Cutoff `c` falls in `order`: its two neighbouring vowels and how far from the first (0..1). */
+function between2(order: string, c: number): [string, string, number] {
+  const k = Math.min(3, Math.floor(c / 256))
+  return [order[k], order[k + 1], (c - 256 * k) / 256]
+}
+
+/** The filter's measured sound (src/ui/vowelMorphs.generated.ts) at Cutoff `c` in `order`, to the nearest 32. */
+function shapeAt(order: string, c: number): number[] {
+  const [a, b, t] = between2(order, c)
+  const key = a < b ? a + b : b + a
+  return VOWEL_MORPHS[key][Math.round((a < b ? t : 1 - t) * 8)]
+}
+
+/** log F1, log F2 at Cutoff `c` in `order`, between its neighbouring vowels' formants. */
+function formantsAt(order: string, c: number): [number, number] {
+  const [a, b, t] = between2(order, c)
+  const [fa, fb] = [VOWEL_FORMANTS[a], VOWEL_FORMANTS[b]]
+  return [Math.log(fa[0] + (fb[0] - fa[0]) * t), Math.log(fa[1] + (fb[1] - fa[1]) * t)]
 }
 
 /**
- * Whether a Filter 1 Cutoff change (in step units, cutoff = 512 + 8 * value) passes one of the five
- * vowels clearly unlike both ends (over 14 units, 112 raw, away): eh -> r passes I, an "ee" neither
- * has; oy's ao -> iy passes I too, but ends next to it, so that glide stays.
+ * Whether a change of Cutoff from `a` to `b` in `order` passes a vowel off the way between them:
+ * one further from the straight line between the two ends (log F1/F2) than 0.3 of its length.
+ * eh -> r passes I (1.2: "ve-ee-ry"); A -> U in AOUIE passes O on the way (0.06: "how").
  */
-function passesVowel(a: number, b: number): boolean {
+function offPath(order: string, a: number, b: number): boolean {
   const [lo, hi] = [Math.min(a, b), Math.max(a, b)]
-  return Object.values(CALIBRATION.vowelAt).some((at) => {
-    const v = (at - 512) / 8
-    return v > lo + 14 && v < hi - 14
+  const [p, q] = [formantsAt(order, a), formantsAt(order, b)]
+  const d = [q[0] - p[0], q[1] - p[1]]
+  const length = Math.hypot(d[0], d[1])
+  for (let k = 1; k <= 3; k++) {
+    const c = 256 * k
+    if (c <= lo + 8 || c >= hi - 8) continue
+    const x = formantsAt(order, c)
+    const t = Math.max(0, Math.min(1, ((x[0] - p[0]) * d[0] + (x[1] - p[1]) * d[1]) / (length * length || 1)))
+    if (Math.hypot(x[0] - p[0] - t * d[0], x[1] - p[1] - t * d[1]) > 0.3 * length) return true
+  }
+  return false
+}
+
+const like = (a: number[], b: number[]) => {
+  let ab = 0
+  let aa = 0
+  let bb = 0
+  a.forEach((v, i) => {
+    ab += v * b[i]
+    aa += v * v
+    bb += b[i] * b[i]
   })
+  return ab / Math.sqrt(aa * bb)
+}
+
+/**
+ * The vowel order for a phrase whose Filter 1 Cutoffs (in AEIOU, where VOWEL_POS is tuned) are
+ * `positions`: in each order every position moves to the point that sounds most like it (an order
+ * where one matches under 0.6 is out). Each order costs a point per glide between `vocal`
+ * neighbours (vowels, l r w y) that must jump, plus 1.5 x (1 - match) per vocal sound it moves
+ * off its tuned sound; the cheapest wins, AEIOU when it ties, so phrases that glide fine keep
+ * their tuned sound exactly. Changes into or out of consonants don't count: their places (v's
+ * dark U, say) are tricks, not glides anyone hears.
+ */
+export function chooseOrder(positions: number[], vocal: boolean[], debug = false): { name: string; place: Map<number, number> } {
+  const distinct = [...new Set(positions)]
+  let best: { name: string; place: Map<number, number>; cost: number } | null = null
+  for (const name of ORDERS) {
+    const place = new Map<number, number>()
+    const match = new Map<number, number>()
+    let ok = true
+    for (const c of distinct) {
+      if (name === 'AEIOU') {
+        place.set(c, c)
+        match.set(c, 1)
+        continue
+      }
+      const target = shapeAt('AEIOU', c)
+      let at = 0
+      let closest = -2
+      for (let x = 0; x <= 1024; x += 32) {
+        const l = like(shapeAt(name, x), target)
+        if (l > closest) [closest, at] = [l, x]
+      }
+      if (closest < 0.6) ok = false
+      place.set(c, at)
+      match.set(c, closest)
+    }
+    if (debug) console.log(name, ok ? '' : '(out)', distinct.map((c) => `${c}->${place.get(c)}`).join(' '))
+    if (!ok) continue
+    let cost = 0
+    for (const c of new Set(positions.filter((_, i) => vocal[i]))) cost += 1.5 * (1 - match.get(c)!)
+    for (let i = 1; i < positions.length; i++) {
+      if (!vocal[i - 1] || !vocal[i]) continue
+      const [a, b] = [place.get(positions[i - 1])!, place.get(positions[i])!]
+      if (a !== b && offPath(name, a, b)) cost++
+    }
+    if (debug) console.log('  cost', cost.toFixed(2))
+    if (!best || cost < best.cost - 1e-9) best = { name, place, cost }
+  }
+  return best!
 }
 
 /** A step value (-64..64) as stored. */
