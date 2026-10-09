@@ -9,7 +9,8 @@
 // Macro 1 (Speed) moves all five LFOs' rates together, from ~0.43x to ~2.3x, normal in the middle;
 // Macro 2 (Fundamental) fades in OSC 3, a Saw at the note played that follows the voicing, for
 // melodic speech and chords. Macro 3 (Voice) scales all formants (Formant Control): the middle is
-// the voice as tuned, up a smaller (female, child) one, down a larger one.
+// the voice as tuned, up a smaller (female, child) one, down a larger one. Macro 4 (Whisper)
+// turns the voice into breath: noise through the Vowel filter instead of OSC 1.
 // ENV 2 (the Amp's) just gates the note; the last step is silent and a one-shot LFO holds it.
 // With `waves`, OSC 1 plays a WaveScan list of waves whose harmonics already show each sound's
 // formants at the note it's tuned for (src/ui/waveSpeech.ts) instead of the Saw; LFO 5 then steps
@@ -754,6 +755,32 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   p.set('macro3panelvalue', 512)
   p.set('macro3target1', 91) // Filt 1 Control
   p.set('macro3depth1', 512 + VOICE_DEPTH * 4)
+
+  // Macro 4, Whisper: the voice turns into breath. A second noise, the Ring Mod of the noise and
+  // OSC 2 (noise times a sine is still noise), goes through the Vowel filter with its own level,
+  // so it keeps the vowels while the plain noise keeps making the hisses in Filter 2. The voicing
+  // curve (LFO 2) goes to Ring Mod Vol at depth 0 (slot 9); the macro turns that up to +128 and
+  // the voicing's routes to OSC 1 (slot 2) and OSC 3 (slot 8, the Fundamental) down by 128, so 0
+  // is the voice, 128 a whisper (64 of 128 on a Matrix Depth is 128; calibrateSpeech macrodepth).
+  p.setMacroName(4, 'Whisper')
+  p.set('osc2type', 0)
+  p.set('osc2semi', 0)
+  p.set('mixerosc2vol', 0)
+  p.set('ringmodsource1', 3) // Noise
+  p.set('ringmodsource2', 1) // Osc 2
+  p.set('ringmoddepth', 1024)
+  p.set('mixerringmodvol', 0)
+  p.set('mixerringmodfilterratio', 0) // Filter 1
+  p.set('modmatrix9modsource', 7) // LFO 2
+  p.set('modmatrix9modtarget', 76) // Ring Mod Vol
+  p.set('modmatrix9depth', 512)
+  p.set('macro4panelvalue', 0)
+  p.set('macro4target1', 162) // Matrix 9 Depth
+  p.set('macro4depth1', 512 + 64 * 4)
+  p.set('macro4target2', 155) // Matrix 2 Depth: voicing to Osc 1 Vol
+  p.set('macro4depth2', 512 - 64 * 4)
+  p.set('macro4target3', 161) // Matrix 8 Depth: voicing to Osc 3 Vol
+  p.set('macro4depth3', 512 - 64 * 4)
 
   // A sound in several parts (a stop's closure and burst, an h or a nasal) is one sound.
   const sounds = segments.map((s) => s.sound).filter((s, i, all) => s === '' || all[i - 1] !== s)

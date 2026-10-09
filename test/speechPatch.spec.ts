@@ -66,7 +66,7 @@ describe('buildSpeechPatch', () => {
     expect(long.patch.get('lfo1steps')).toBe(64)
   })
 
-  it('has Speed (LFO rates), Fundamental (OSC 3 with the voicing) and Voice (Formant Control) macros', () => {
+  it('has Speed (LFO rates), Fundamental (OSC 3 with the voicing), Voice (Formant Control) and Whisper (breath for voice) macros', () => {
     const s = buildSpeechPatch('hello world')!
     expect(s.patch.macroName(1)).toBe('Speed')
     expect(show(s, 'macro1panelvalue')).toBe('64,0')
@@ -77,6 +77,11 @@ describe('buildSpeechPatch', () => {
     expect(show(s, 'modmatrix8modsource')).toBe('LFO 2')
     expect(show(s, 'modmatrix8modtarget')).toBe('Osc 3 Vol')
     expect(show(s, 'osc3type')).toBe('Saw')
+    expect(s.patch.macroName(4)).toBe('Whisper')
+    expect([1, 2, 3].map((i) => show(s, `macro4target${i}`))).toEqual(['Matrix 9 Depth', 'Matrix 2 Depth', 'Matrix 8 Depth'])
+    expect(show(s, 'modmatrix9modtarget')).toBe('Ring Mod Vol')
+    expect(show(s, 'ringmodsource1')).toBe('Noise')
+    expect(show(s, 'mixerringmodfilterratio')).toBe('100:0')
     expect(s.patch.macroName(3)).toBe('Voice')
     expect(show(s, 'macro3target1')).toBe('Filt 1 Control')
     // Formant Control 64 (raw 512) with the Voice knob in its middle: base + 64/128 * 32/128 * 1024.
