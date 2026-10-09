@@ -37,6 +37,9 @@
   (28 patches), FX sidechain 5/6, unset LFO steps (0), ribbon key lock 0, a few stray bytes.
 - **FX parameter NRPN** (`prefxNparamM`): Edisyn never sends them live. We use the generic
   per-slot numbers x8, which its code implies -- confirmed on the device.
+- **Env/LFO Quantize NRPN** is sent x8. Edisyn sends the bare index (its note: firmware 2.0.0
+  sent it x8 but didn't divide on receive); 2.2.0 divides, so only "3" landed, as "257"
+  (user, 2026-10-10).
 - **Arp tempo** is stored twice (bytes 28 and 808, differing in ~1/5 of patches); Edisyn
   writes both but reads one. We write both.
 

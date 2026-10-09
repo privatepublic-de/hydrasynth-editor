@@ -195,6 +195,12 @@ describe.skipIf(!haveExtract)('against Edisyn, on the dumped patches', () => {
             : null
         // Edisyn never sends FX params live (see tools/generateParams.ts); ours are confirmed on the device.
         if (theirs === null && /^(pre|post)fx\dparam\d$/.test(key)) continue
+        // Firmware 2.2.0 divides Env/LFO Quantize by 8 on receive; Edisyn's unscaled value is for 2.0.0.
+        if (theirs && /^(env|lfo)\dquantize$/.test(key)) {
+          if (JSON.stringify(ours) !== JSON.stringify({ ...theirs, value: theirs.value * 8 })) mismatches.push(`${key}=${v}: ours ${JSON.stringify(ours)}, Edisyn x8 ${theirs.value * 8}`)
+          checked++
+          continue
+        }
         if (JSON.stringify(ours) !== JSON.stringify(theirs)) mismatches.push(`${key}=${v}: ours ${JSON.stringify(ours)}, Edisyn ${JSON.stringify(theirs)}`)
         checked++
       }

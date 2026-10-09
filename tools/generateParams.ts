@@ -107,6 +107,13 @@ function nrpnSpec(key: string, min: number): NrpnSpec | undefined {
   if (fx) return { param: FX_PARAM_NRPN[fx[1]][+fx[2] - 1], base: 0, mul: 8, negAdd: 0 }
   const rows = nrpnRows.get(key)
   if (!rows) return undefined
+  // Edisyn sends Env/LFO Quantize unscaled because firmware 2.0.0 didn't divide it by 8 on input
+  // (it always sent it x8); on 2.2.0 it divides, so only the last choice landed, as the first.
+  if (/^(env|lfo)\dquantize$/.test(key)) return { ...nrpnSpecFromRows(key, min, rows)!, mul: 8 }
+  return nrpnSpecFromRows(key, min, rows)
+}
+
+function nrpnSpecFromRows(key: string, min: number, rows: (number | null | number[])[][]): NrpnSpec | undefined {
   const points: [number, number, number][] = []
   for (const [v, ...msgs] of rows as [number, ...(number[] | null)[]][]) {
     if (msgs.length === 1 && msgs[0] === null) continue
