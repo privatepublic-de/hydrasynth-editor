@@ -21,7 +21,7 @@
 //                    (env, default 64 = linear): semitones over time, for the question rise
 //   positions        Saw through the Vowel filter, Cutoff in steps of 32: the best Cutoff per vowel
 //   scan             six waves in the WaveScan list, a Step LFO on Osc 1 WaveScan to slot 0..5: which wave sounds
-//   speak <words> [waves]  the speech patch (src/ui/speechPatch.ts) at C3, saved to local/speech-samples
+//   speak <words> [saw|waves|fixed]  the speech patch (src/ui/speechPatch.ts) at C3, saved to local/speech-samples
 //   sources          each vowel at C2/C3/C4 from a Saw or from its matched wave (src/ui/waveSpeech.ts),
 //                    through the Vowel filter or not: how often it reads as the right vowel
 // The patches carry the ETCD marker, without which the synth ignores LFO steps 9-64.
@@ -468,7 +468,8 @@ ${Object.keys(pairs)
     values.forEach((v, i) => console.log(`cutoff ${String(v).padStart(4)}: ${bandBar(x, Math.round((i * 0.5 + 0.2) * RATE))}`))
     console.log(`bands ${BANDS.map((f) => Math.round(f)).join(' ')}`)
   } else if (experiment === 'speak') {
-    const withWaves = process.argv[4] === 'waves'
+    // waves: a wave per sound; fixed: one wave for the phrase (LFO 5 then draws the melody).
+    const withWaves = process.argv[4] === 'waves' || process.argv[4] === 'fixed'
     const levels = withWaves
       ? JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves.map((w: { cycle: string }) =>
           harmonicLevels(Float32Array.from(new Int16Array(new Uint8Array(Buffer.from(w.cycle, 'base64')).buffer), (v) => v / 32767)),
@@ -477,7 +478,7 @@ ${Object.keys(pairs)
     const dictionary = parsePronunciations(readFileSync('public/pronunciations.txt', 'utf8'))
     // TUNING='{"vowelGlideMs":70}': overrides of the patch's tuning; SUFFIX: added to the file name.
     const tuning = process.env.TUNING ? JSON.parse(process.env.TUNING) : undefined
-    const s = buildSpeechPatch(arg, { dictionary, tuning, ...(levels ? { waves: { levels, f0: 130.81 } } : {}) })!
+    const s = buildSpeechPatch(arg, { dictionary, tuning, ...(levels ? { waves: { levels, f0: 130.81, fixed: process.argv[4] === 'fixed' } } : {}) })!
     console.log(`${arg}: ${s.sounds.join(' ')}, ${s.ms} ms${withWaves ? `, waves ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => formatValue(param(`osc1wavscanwave${n}`), s.patch.get(`osc1wavscanwave${n}`))).join(', ')}` : ''}`)
     const x = await take(s.patch, 48, s.ms / 1000 + 0.4)
     // What each 20 ms sounds like, against the planned Filter 1 Cutoff of that step.
@@ -489,7 +490,7 @@ ${Object.keys(pairs)
       console.log(`${String(t).padStart(4)} ms ${bandBar(x, Math.round((t / 1000) * RATE))} cutoff ${512 + plan(1) * 8} voice ${plan(2) * 2} noise ${plan(3) * 2}`)
     }
     mkdirSync('local/speech-samples', { recursive: true })
-    const out = `local/speech-samples/${arg.replace(/\?/g, ' Q').trim().replace(/\W+/g, '-')}${withWaves ? '-waves' : '-saw'}${process.env.SUFFIX ?? ''}.wav`
+    const out = `local/speech-samples/${arg.replace(/\?/g, ' Q').trim().replace(/\W+/g, '-')}${process.argv[4] === 'fixed' ? '-fixed' : withWaves ? '-waves' : '-saw'}${process.env.SUFFIX ?? ''}.wav`
     copyFileSync(FILE, out)
     console.log('saved', out)
   } else if (experiment === 'sources') {

@@ -20,7 +20,7 @@ import { formatValue } from '../params/display'
 import { initPatchBytes } from '../params/initPatch'
 import { Patch, param } from '../params/patch'
 import { VOWEL_MORPHS } from './vowelMorphs.generated'
-import { pronounce, waveFor, type Pronunciations } from './waveSpeech'
+import { pronounce, waveFor, waveForAll, type Pronunciations } from './waveSpeech'
 
 /** What the synth showed when measured (tools/calibrateSpeech.ts), so the numbers can be checked again. */
 export const CALIBRATION = {
@@ -497,8 +497,12 @@ export interface SpeechPatch {
 export interface SpeechPatchOptions {
   /** 1 normal, above 1 slower. */
   speed?: number
-  /** Shape the voice with waves instead of the Saw: each wave's harmonicLevels, and the note (Hz) to tune them for. */
-  waves?: { levels: (number[] | null)[]; f0: number }
+  /**
+   * Shape the voice with waves instead of the Saw: each wave's harmonicLevels, and the note (Hz) to
+   * tune them for. `fixed`: one wave for the whole phrase (the one fitting all its voiced sounds
+   * best), so LFO 5 stays free for the melody; else a wave per voiced sound, scanned by LFO 5.
+   */
+  waves?: { levels: (number[] | null)[]; f0: number; fixed?: boolean }
   /** How words are said (loadPronunciations); without it, or for words it lacks, the spelling rules. */
   dictionary?: Pronunciations | null
   /** Overrides of TUNING. */
@@ -601,7 +605,11 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   )
   segments.forEach((s, i) => (s.pos = order.place.get(keys[i])!))
   p.set('filter1vowelorder', ORDERS.indexOf(order.name))
-  const list = waves ? waveList(segments, waves.levels, waves.f0) : null
+  const list = waves && !waves.fixed ? waveList(segments, waves.levels, waves.f0) : null
+  if (waves?.fixed) {
+    const voiced = [...new Set(segments.map((s) => s.shape).filter((x): x is string => !!x))]
+    if (voiced.length) p.set('osc1type', waveForAll(voiced, waves.levels, waves.f0))
+  }
   /**
    * Each curve moves between sounds in a ramp `glideMs` long, written into the steps (a moving
    * average over that many steps), and glides straight from step to step (Smooth 127): a curve
@@ -747,8 +755,8 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   p.set('macro3target1', 91) // Filt 1 Control
   p.set('macro3depth1', 512 + VOICE_DEPTH * 4)
 
-  // A stop's closure and burst are one sound.
-  const sounds = segments.map((s) => s.sound).filter((s, i, all) => !(s in STOP && all[i - 1] === s))
+  // A sound in several parts (a stop's closure and burst, an h or a nasal) is one sound.
+  const sounds = segments.map((s) => s.sound).filter((s, i, all) => s === '' || all[i - 1] !== s)
   return { patch: p, sounds, ms: Math.round(total * t.stepMs), dropped, order: order.name }
 }
 

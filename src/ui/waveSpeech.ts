@@ -348,8 +348,17 @@ export function formantLevels(formants: number[], f0: number, count: number): nu
 
 /** The wave that best plays `sound` at `f0`; `levels` are each wave's harmonicLevels. */
 export function waveFor(sound: string, levels: (number[] | null)[], f0: number): number {
+  const scores = waveScores(sound, levels, f0)
+  return scores.indexOf(Math.max(...scores))
+}
+
+/**
+ * How well each wave plays `sound` at `f0` (-Infinity for waves left out): vowels and glides by
+ * their formants up to 3.5 kHz; nasals and hisses by their overall shape to 8 kHz, hisses only
+ * from the noisiest waves, so they sound like breath rather than a bright tone.
+ */
+function waveScores(sound: string, levels: (number[] | null)[], f0: number): number[] {
   const kind = kindOf(sound)!
-  // Vowels and glides by their formants up to 3.5 kHz; nasals and hisses by their overall shape to 8 kHz.
   const top = Math.min(HARMONICS, Math.floor((kind === 'vowel' || kind === 'glide' ? 3500 : 8000) / f0))
   const count = Math.max(top, 4)
   let target: number[]
@@ -363,20 +372,17 @@ export function waveFor(sound: string, levels: (number[] | null)[], f0: number):
   }
   const peak = Math.max(...target)
   target = target.map((v) => Math.max(v - peak, -40))
-  // Hisses only from the noisiest waves, so they sound like breath rather than a bright tone.
-  const pool = kind === 'hiss' ? [...WAVE_FEATURES.keys()].sort((a, b) => WAVE_FEATURES[b].jagged - WAVE_FEATURES[a].jagged).slice(0, 40) : [...WAVE_FEATURES.keys()]
-  let best = 0
-  let bestScore = -Infinity
-  for (const w of pool) {
-    const l = levels[w]
-    if (!l) continue
-    const score = similarity(target, l.slice(0, count).map((v) => Math.max(v, -40)), kind === 'vowel' || kind === 'glide')
-    if (score > bestScore) {
-      best = w
-      bestScore = score
-    }
-  }
-  return best
+  const pool = new Set(kind === 'hiss' ? [...WAVE_FEATURES.keys()].sort((a, b) => WAVE_FEATURES[b].jagged - WAVE_FEATURES[a].jagged).slice(0, 40) : WAVE_FEATURES.keys())
+  return levels.map((l, w) =>
+    l && pool.has(w) ? similarity(target, l.slice(0, count).map((v) => Math.max(v, -40)), kind === 'vowel' || kind === 'glide') : -Infinity,
+  )
+}
+
+/** The one wave that best plays all of `sounds` at `f0`: the highest mean of their waveScores. */
+export function waveForAll(sounds: string[], levels: (number[] | null)[], f0: number): number {
+  const scores = sounds.map((s) => waveScores(s, levels, f0))
+  const mean = levels.map((_, w) => scores.reduce((sum, sc) => sum + sc[w], 0) / scores.length)
+  return mean.indexOf(Math.max(...mean))
 }
 
 export interface Speech {

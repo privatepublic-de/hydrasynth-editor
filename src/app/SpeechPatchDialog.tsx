@@ -4,6 +4,13 @@ import { buildSpeechPatch } from '../ui/speechPatch'
 import { loadPronunciations, PITCHES, waveLevels, type Pronunciations } from '../ui/waveSpeech'
 import { useEditor } from './store'
 
+/** What the voice is made of (OSC 1): the plain Saw, one wave for the phrase, or a wave per sound. */
+const SOURCES = [
+  { label: 'Saw, with melody', waves: false, fixed: false, says: 'A Saw', lfo5: 'melody' },
+  { label: 'One wave, with melody', waves: true, fixed: true, says: 'One wave fitting all its sounds', lfo5: 'melody' },
+  { label: 'A wave per sound', waves: true, fixed: false, says: 'Waves matched to each sound', lfo5: 'wave (ENV 3 moves the pitch)' },
+]
+
 const SPEEDS = [
   { label: 'Slow', speed: 1.4 },
   { label: 'Normal', speed: 1 },
@@ -22,7 +29,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
   const loadPatch = useEditor((s) => s.loadPatch)
   const [speed, setSpeed] = useState(1)
   const [input, setInput] = useState(text)
-  const [withWaves, setWithWaves] = useState(true)
+  const [source, setSource] = useState(1)
   const [pitch, setPitch] = useState(1)
   const [dictionary, setDictionary] = useState<Pronunciations | null>(null)
   useEffect(() => {
@@ -36,10 +43,11 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
     ref.current?.close()
     if (!speech) return onDone('Nothing to say', input)
     let patch = speech.patch
-    if (withWaves) {
+    if (SOURCES[source].waves) {
       const levels = await waveLevels()
       if (levels.filter(Boolean).length < WAVE_FEATURES.length) return onDone("The wave data didn't load", input)
-      patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary, waves: { levels, f0: PITCHES[pitch].hz } })!.patch
+      const waves = { levels, f0: PITCHES[pitch].hz, fixed: SOURCES[source].fixed }
+      patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary, waves })!.patch
     }
     void loadPatch(patch, `Speech patch “${words}”`)
     onDone(
@@ -63,14 +71,24 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
         {dirty && ` Your changes to “${name}” haven’t been written to the synth.`}
       </p>
       <p>
-        {withWaves ? 'Waves matched to each sound' : 'A Saw'} through the Vowel filter and noise through Filter 2, run by five one-shot
-        Step LFOs: vowel, voicing, hiss, hiss colour and {withWaves ? 'wave (ENV 3 lowers the pitch)' : 'pitch'}. {speech ? `It says ${speech.sounds.map((s) => s || '·').join(' ')} in ${(speech.ms / 1000).toFixed(1)} s; hold the note at least that long.` : 'There are no words to say.'}
+        {SOURCES[source].says} through the Vowel filter and noise through Filter 2, run by five one-shot Step LFOs: vowel, voicing,
+        hiss, hiss colour and {SOURCES[source].lfo5}. {speech ? `It says ${speech.sounds.map((s) => s || '·').join(' ')} in ${(speech.ms / 1000).toFixed(1)} s; hold the note at least that long.` : 'There are no words to say.'}
         {speech?.dropped ? ` Too long: the last ${speech.dropped} sounds are left out.` : ''}
       </p>
-      <label className="speech-dialog__field" title="Waves whose harmonics already show each sound's formants: clearer vowels around the chosen note, less so far from it">
-        <input type="checkbox" checked={withWaves} onChange={(e) => setWithWaves(e.target.checked)} />
-        Shape the voice with waves, tuned for
-        <select value={pitch} onChange={(e) => setPitch(Number(e.target.value))} disabled={!withWaves}>
+      <label
+        className="speech-dialog__field"
+        title="Waves whose harmonics already show the sounds' formants: clearer vowels around the chosen note, less so far from it. A wave per sound changes with each sound but has no melody on its syllables."
+      >
+        Voice
+        <select value={source} onChange={(e) => setSource(Number(e.target.value))}>
+          {SOURCES.map((s, i) => (
+            <option key={s.label} value={i}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+        tuned for
+        <select value={pitch} onChange={(e) => setPitch(Number(e.target.value))} disabled={!SOURCES[source].waves}>
           {PITCHES.map((p, i) => (
             <option key={p.label} value={i}>
               {p.label}
