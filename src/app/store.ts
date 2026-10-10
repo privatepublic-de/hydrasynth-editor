@@ -53,6 +53,8 @@ interface EditorState {
   bankNames: Record<number, string[]>
   /** The slot last opened (or asked for): where Write starts for a patch that isn't stored. */
   lastSlot: Slot
+  /** The slot a write in progress stores to (it takes seconds: the app shows a wait message). */
+  writing: Slot | null
   module: string
   /** A param to scroll to and highlight (a mod-matrix or macro row), and what to focus there. */
   reveal: { module: string; rowKey: string; focusKey?: string; nonce: number } | null
@@ -141,6 +143,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   sync: null,
   bankNames: {},
   lastSlot: { bank: 0, patch: 0 },
+  writing: null,
   module: 'osc1',
   reveal: null,
   menu: null,
@@ -410,7 +413,9 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   async write(slot) {
+    set({ writing: slot })
     await patchSync?.write(slot).catch(() => undefined)
+    set({ writing: null })
     const names = get().bankNames[slot.bank]
     const patch = patchSync?.get().patch
     if (names && patch) {

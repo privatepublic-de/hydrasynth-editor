@@ -6,6 +6,7 @@ import { ParamMenu } from './Modulation'
 import { ModuleSelect } from './ModuleSelect'
 import { MidiPort, Pads } from './Pads'
 import { PatchHeading } from './PatchHeading'
+import { WaitDialog } from './WaitDialog'
 import { PatchBar } from './PatchBar'
 import { useEditor } from './store'
 
@@ -76,6 +77,7 @@ export function App() {
         <MidiPort />
       </footer>
       <ParamMenu />
+      <WaitDialog />
       <BackupDialog />
       <RestoreDialog />
     </div>

@@ -625,6 +625,38 @@ select {
   padding: 8px 10px;
 }
 
+.wait-dialog[open] {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.wait-dialog p {
+  margin: 0;
+}
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: 3px solid var(--edge);
+  border-top-color: var(--access);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 3s;
+  }
+}
+
 .write-dialog__actions {
   display: flex;
   justify-content: flex-end;
