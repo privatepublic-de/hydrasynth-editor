@@ -21,7 +21,9 @@
 //                    (env, default 64 = linear): semitones over time, for the question rise
 //   positions        Saw through the Vowel filter, Cutoff in steps of 32: the best Cutoff per vowel
 //   scan             six waves in the WaveScan list, a Step LFO on Osc 1 WaveScan to slot 0..5: which wave sounds
-//   speak <words> [saw|waves|fixed]  the speech patch (src/ui/speechPatch.ts) at C3, saved to local/speech-samples
+//   speak <words> [saw|waves|fixed|scan]  the speech patch (src/ui/speechPatch.ts) at C3 (env NOTE), saved to
+//                    local/speech-samples; scan: a wave per sound, no Vowel filter (an LP at each sound's F2)
+//   cutoff1 [raws]   noise through Filter 1 (env TYPE, RES), Cutoff at each value: where its peak sits
 //   legato [words]   the speech patch in Mono, a second note overlapping the first halfway through (and
 //                    one after letting go): does the phrase go on, or start again? Per LFO Trig Sync
 //   freeze [words]   the sung speech patch frozen from 0.6 to 2.6 s by the Freeze macro, by the Mod Wheel,
@@ -213,6 +215,33 @@ try {
       })
       const peak = smooth.indexOf(Math.max(...smooth.slice(4)))
       console.log(`cutoff ${String(v).padStart(4)}: band centre ${Math.round((peak * RATE) / N)} Hz`)
+    }
+  } else if (experiment === 'cutoff1') {
+    // Noise through Filter 1 alone (env TYPE, default 12 = BP Stn 12; RES, default 768), keytrack 0 %,
+    // Cutoff swept: where its peak sits per value, as for Filter 2 in 'noise'.
+    const p = initPatch()
+    p.set('mixerosc1vol', 0)
+    p.set('mixernoisevol', 1024)
+    p.set('mixerfilterrouting', 1)
+    p.set('mixernoisefilterratio', 0)
+    p.set('filter1type', Number(process.env.TYPE ?? 12))
+    p.set('filter1resonance', Number(process.env.RES ?? 768))
+    p.set('filter1keytrack', 512)
+    const values = (arg ?? '0,128,256,384,512,640,768,896,1024').split(',').map(Number)
+    const x = await take(p, 48, values.length * 0.6, values.map((v, i) => [i * 0.6, 'filter1cutoff', v]))
+    const N = 4096
+    for (const [i, v] of values.entries()) {
+      const from = Math.round((i * 0.6 + 0.15) * RATE)
+      const power = new Array(N / 2).fill(0)
+      for (let k = 0; k < 4; k++) spectrum(x, from + k * 2048, N).forEach((d, j) => (power[j] += 10 ** (d / 10)))
+      const db = power.map((e) => 10 * Math.log10(e))
+      const smooth = db.map((_, j) => {
+        const w = Math.max(1, Math.round(j * 0.12))
+        const near = db.slice(Math.max(0, j - w), j + w + 1)
+        return near.reduce((a, b) => a + b, 0) / near.length
+      })
+      const peak = smooth.indexOf(Math.max(...smooth.slice(4)))
+      console.log(`cutoff ${String(v).padStart(4)}: peak ${Math.round((peak * RATE) / N)} Hz ${bandBar(x, from)}`)
     }
   } else if (experiment === 'pitch') {
     // A Sine, LFO steps 0, +10, -10, +20 at depth +128.
@@ -476,7 +505,9 @@ ${Object.keys(pairs)
     console.log(`bands ${BANDS.map((f) => Math.round(f)).join(' ')}`)
   } else if (experiment === 'speak') {
     // waves: a wave per sound; fixed: one wave for the phrase (LFO 5 then draws the melody).
-    const withWaves = process.argv[4] === 'waves' || process.argv[4] === 'fixed'
+    // scan: a wave per sound without the Vowel filter, an LP at each sound's F2 instead. NOTE=36/60: play at C2/C4.
+    const mode = process.argv[4] ?? 'saw'
+    const withWaves = mode === 'waves' || mode === 'fixed' || mode === 'scan'
     const levels = withWaves
       ? JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves.map((w: { cycle: string }) =>
           harmonicLevels(Float32Array.from(new Int16Array(new Uint8Array(Buffer.from(w.cycle, 'base64')).buffer), (v) => v / 32767)),
@@ -485,9 +516,10 @@ ${Object.keys(pairs)
     const dictionary = parsePronunciations(readFileSync('public/pronunciations.txt', 'utf8'))
     // TUNING='{"vowelGlideMs":70}': overrides of the patch's tuning; SUFFIX: added to the file name.
     const tuning = process.env.TUNING ? JSON.parse(process.env.TUNING) : undefined
-    const s = buildSpeechPatch(arg, { dictionary, tuning, ...(levels ? { waves: { levels, f0: 130.81, fixed: process.argv[4] === 'fixed' } } : {}) })!
+    const s = buildSpeechPatch(arg, { dictionary, tuning, ...(levels ? { waves: { levels, f0: 130.81, fixed: mode === 'fixed', plain: mode === 'scan' } } : {}) })!
     console.log(`${arg}: ${s.sounds.join(' ')}, ${s.ms} ms${withWaves ? `, waves ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => formatValue(param(`osc1wavscanwave${n}`), s.patch.get(`osc1wavscanwave${n}`))).join(', ')}` : ''}`)
-    const x = await take(s.patch, 48, s.ms / 1000 + 0.4)
+    const note = Number(process.env.NOTE ?? 48)
+    const x = await take(s.patch, note, s.ms / 1000 + 0.4)
     // What each 20 ms sounds like, against the planned Filter 1 Cutoff of that step.
     const steps = s.patch.get('lfo1steps')
     const stepMs = s.ms / (steps - 1)
@@ -497,7 +529,7 @@ ${Object.keys(pairs)
       console.log(`${String(t).padStart(4)} ms ${bandBar(x, Math.round((t / 1000) * RATE))} cutoff ${512 + plan(1) * 8} voice ${plan(2) * 2} noise ${plan(3) * 2}`)
     }
     mkdirSync('local/speech-samples', { recursive: true })
-    const out = `local/speech-samples/${arg.replace(/\?/g, ' Q').replace(/!/g, ' X').replace(/\./g, ' P').trim().replace(/\W+/g, '-')}${process.argv[4] === 'fixed' ? '-fixed' : withWaves ? '-waves' : '-saw'}${process.env.SUFFIX ?? ''}.wav`
+    const out = `local/speech-samples/${arg.replace(/\?/g, ' Q').replace(/!/g, ' X').replace(/\./g, ' P').trim().replace(/\W+/g, '-')}-${mode}${note === 48 ? '' : `-n${note}`}${process.env.SUFFIX ?? ''}.wav`
     copyFileSync(FILE, out)
     console.log('saved', out)
   } else if (experiment === 'legato') {
@@ -603,18 +635,28 @@ ${Object.keys(pairs)
     const SEG = 0.5
     for (const [note, f0] of [[36, 65.41], [48, 130.81], [60, 261.63]] as const) {
       const count = Math.floor(3500 / f0)
+      // WAVE_F0=130.81: the waves picked for C3 at every note, as the speech patch plays them.
+      const waveF0 = Number(process.env.WAVE_F0 ?? f0)
       const target = (v: string) => formantLevels(FORMANTS[v], f0, count).map((d, _, all) => Math.max(d - Math.max(...all), -40))
       const conditions = [
         { label: 'Saw + Vowel filter', wave: () => 3, filter: true },
-        { label: 'wave + Vowel filter', wave: (v: string) => waveFor(v, levels, f0), filter: true },
-        { label: 'wave alone', wave: (v: string) => waveFor(v, levels, f0), filter: false },
+        { label: 'wave + Vowel filter', wave: (v: string) => waveFor(v, levels, waveF0), filter: true },
+        { label: 'wave alone', wave: (v: string) => waveFor(v, levels, waveF0), filter: false },
+        // LP Ladder 12 a little above F2 (LP_RATIO, default 1.25; resonance LP_RES, default 512).
+        { label: 'wave + LP at F2', wave: (v: string) => waveFor(v, levels, waveF0), filter: false, lp: true },
       ]
       // One take per note: every vowel in every condition, half a second each.
       const changes: [number, string, number][] = []
       let at = 0
       for (const c of conditions)
         for (const v of vowels) {
-          changes.push([at, 'osc1type', c.wave(v)], [at, 'filter1type', c.filter ? 10 : 0], [at, 'filter1cutoff', c.filter ? pos(v) : 1024])
+          const lpRaw = Math.round(512 + 96 * Math.log2((FORMANTS[v][1] * Number(process.env.LP_RATIO ?? 1.25)) / 600))
+          changes.push(
+            [at, 'osc1type', c.wave(v)],
+            [at, 'filter1type', c.filter ? 10 : 0],
+            [at, 'filter1cutoff', c.filter ? pos(v) : 'lp' in c ? lpRaw : 1024],
+            [at, 'filter1resonance', c.filter ? 576 : 'lp' in c ? Number(process.env.LP_RES ?? 512) : 0],
+          )
           at += SEG
         }
       const p = initPatch()

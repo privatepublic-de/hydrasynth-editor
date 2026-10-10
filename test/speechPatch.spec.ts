@@ -166,6 +166,22 @@ describe('buildSpeechPatch', () => {
       }
     })
 
+    it('makes the vowels without the Vowel filter when plain: a low-pass, a wave of its own per sound', () => {
+      const p = buildSpeechPatch('the house', { waves: { levels, f0: 130.81, plain: true } })!
+      expect(show(p, 'filter1type')).toBe('LP Ladder 12')
+      expect(show(p, 'modmatrix1modtarget')).toBe('Filt 1 Cutoff')
+      expect(show(p, 'modmatrix5modtarget')).toBe('Osc 1 WaveScan')
+      expect(show(p, 'modmatrix7modtarget')).not.toBe('Filt 1 Control')
+      expect(p.patch.macroName(3)).not.toBe('Voice')
+      // ah, aa and uw: three waves, none shared.
+      const waves = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => p.patch.get(`osc1wavscanwave${n}`)).filter((w, n) => n === 0 || w >= 2).map((w, n) => (n ? w - 2 : w))
+      expect(new Set(waves).size).toBe(waves.length)
+      expect(waves.length).toBeGreaterThanOrEqual(3)
+      // m n ng close the low-pass far below a vowel's.
+      const m = buildSpeechPatch('ma', { waves: { levels, f0: 130.81, plain: true } })!
+      expect(step(m, 1, 1)).toBeLessThan(step(m, 1, m.patch.get('lfo1steps') - 2))
+    })
+
     it('leaves the Saw patch as it was without them', () => {
       const plain = buildSpeechPatch('hello world')!
       expect(show(plain, 'osc1mode')).toBe('Single')

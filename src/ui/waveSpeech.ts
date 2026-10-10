@@ -347,8 +347,8 @@ export function formantLevels(formants: number[], f0: number, count: number): nu
 }
 
 /** The wave that best plays `sound` at `f0`; `levels` are each wave's harmonicLevels. */
-export function waveFor(sound: string, levels: (number[] | null)[], f0: number): number {
-  const scores = waveScores(sound, levels, f0)
+export function waveFor(sound: string, levels: (number[] | null)[], f0: number, taken: number[] = []): number {
+  const scores = waveScores(sound, levels, f0).map((v, w) => (taken.includes(w) ? -Infinity : v))
   return scores.indexOf(Math.max(...scores))
 }
 

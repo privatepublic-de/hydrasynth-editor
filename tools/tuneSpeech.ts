@@ -51,6 +51,10 @@ const CANDIDATES: Numeric = {
   vibratoRate: [70, 90, 105],
   drift: [0, 30, 60, 100],
   tempo: [1.2, 1.4, 1.6],
+  // Only for waves.plain, which this doesn't play.
+  lpRatio: [],
+  lpResonance: [],
+  lpNasalHz: [],
 }
 const DIR = 'local/tune'
 const FILE = `${DIR}/take.wav`

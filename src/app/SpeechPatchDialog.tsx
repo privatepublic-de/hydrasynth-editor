@@ -4,11 +4,15 @@ import { buildSpeechPatch } from '../ui/speechPatch'
 import { loadPronunciations, PITCHES, waveLevels, type Pronunciations } from '../ui/waveSpeech'
 import { useEditor } from './store'
 
-/** What the voice is made of (OSC 1): the plain Saw, one wave for the phrase, or a wave per sound. */
+/**
+ * What the voice is made of (OSC 1): the plain Saw, one wave for the phrase, or a wave per sound;
+ * that last also without the Vowel filter (`plain`), the waves alone making the vowels.
+ */
 const SOURCES = [
-  { label: 'Saw, with melody', waves: false, fixed: false, says: 'A Saw', lfo5: 'melody' },
-  { label: 'One wave, with melody', waves: true, fixed: true, says: 'One wave fitting all its sounds', lfo5: 'melody' },
-  { label: 'A wave per sound', waves: true, fixed: false, says: 'Waves matched to each sound', lfo5: 'wave (ENV 3 moves the pitch)' },
+  { label: 'Saw, with melody', waves: false, fixed: false, plain: false, says: 'A Saw', lfo5: 'melody' },
+  { label: 'One wave, with melody', waves: true, fixed: true, plain: false, says: 'One wave fitting all its sounds', lfo5: 'melody' },
+  { label: 'A wave per sound', waves: true, fixed: false, plain: false, says: 'Waves matched to each sound', lfo5: 'wave (ENV 3 moves the pitch)' },
+  { label: 'A wave per sound, no Vowel filter', waves: true, fixed: false, plain: true, says: 'Waves matched to each sound', lfo5: 'wave (ENV 3 moves the pitch)' },
 ]
 
 const SPEEDS = [
@@ -47,7 +51,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
     if (SOURCES[source].waves) {
       const levels = await waveLevels()
       if (levels.filter(Boolean).length < WAVE_FEATURES.length) return onDone("The wave data didn't load", input)
-      const waves = { levels, f0: PITCHES[pitch].hz, fixed: SOURCES[source].fixed }
+      const waves = { levels, f0: PITCHES[pitch].hz, fixed: SOURCES[source].fixed, plain: SOURCES[source].plain }
       patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary, waves, sing })!.patch
     }
     void loadPatch(patch, `Speech patch “${words}”`)
@@ -72,14 +76,14 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
         {dirty && ` Your changes to “${name}” haven’t been written to the synth.`}
       </p>
       <p>
-        {SOURCES[source].says} through the Vowel filter and noise through Filter 2, run by one-shot Step LFOs: vowel, voicing,{' '}
+        {SOURCES[source].says} through {SOURCES[source].plain ? 'a low-pass (no Vowel filter, no Voice macro)' : 'the Vowel filter'} and noise through Filter 2, run by one-shot Step LFOs: vowel, voicing,{' '}
         {sing && SOURCES[source].lfo5 === 'melody' ? 'hiss and hiss colour' : `hiss, hiss colour and ${sing ? 'wave' : SOURCES[source].lfo5}`}
         {sing ? '; the keys play the tune' : ''}. {speech ? `It says ${speech.sounds.map((s) => s || '·').join(' ')} in ${(speech.ms / 1000).toFixed(1)} s; hold the note at least that long.` : 'There are no words to say.'}
         {speech?.dropped ? ` Too long: the last ${speech.dropped} sounds are left out.` : ''}
       </p>
       <label
         className="speech-dialog__field"
-        title="Waves whose harmonics already show the sounds' formants: clearer vowels around the chosen note, less so far from it. A wave per sound changes with each sound but has no melody on its syllables."
+        title="Waves whose harmonics already show the sounds' formants: clearer vowels around the chosen note, less so far from it. A wave per sound changes with each sound but has no melody on its syllables. Without the Vowel filter, only the waves make the vowels: they hold near the chosen note and lose them an octave away."
       >
         Voice
         <select value={source} onChange={(e) => setSource(Number(e.target.value))}>

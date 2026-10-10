@@ -16,6 +16,8 @@
 // With `waves`, OSC 1 plays a WaveScan list of waves whose harmonics already show each sound's
 // formants at the note it's tuned for (src/ui/waveSpeech.ts) instead of the Saw; LFO 5 then steps
 // WaveScan, and ENV 3 lets the phrase fall (or a yes/no question rise) in pitch: no melody on its syllables.
+// With `waves.plain` as well, no Vowel filter: the waves alone make the vowels and Filter 1 is a
+// low-pass on LFO 1, a little above each sound's F2 (no Voice macro then).
 // With `sing`, the keys give the pitch: Mono, no melody, and a legato note goes on with the phrase
 // at its pitch (see SING_STEPS) instead of starting it again.
 //
@@ -24,7 +26,7 @@ import { formatValue } from '../params/display'
 import { initPatchBytes } from '../params/initPatch'
 import { Patch, param } from '../params/patch'
 import { VOWEL_MORPHS } from './vowelMorphs.generated'
-import { pronounce, waveFor, waveForAll, type Pronunciations } from './waveSpeech'
+import { FORMANTS, pronounce, waveFor, waveForAll, type Pronunciations } from './waveSpeech'
 
 /** What the synth showed when measured (tools/calibrateSpeech.ts), so the numbers can be checked again. */
 export const CALIBRATION = {
@@ -348,6 +350,11 @@ export interface Tuning {
   questionRise: number
   /** How high (semitones) the nucleus of a statement or wh-question peaks (melody; only without waves, where LFO 5 draws pitch). */
   stressLift: number
+  /** Without the Vowel filter (waves.plain): LP Ladder 12 Cutoff at this times each sound's F2, and its resonance (raw). */
+  lpRatio: number
+  lpResonance: number
+  /** ... and at this (Hz) for m, n, ng: the nose passes only the low murmur. */
+  lpNasalHz: number
 }
 /**
  * Chosen by ear from tools/tuneSpeech.ts runs: longer vowel glides scored smoother still (160 ms:
@@ -396,6 +403,9 @@ export const TUNING: Tuning = {
   questionRise: 1.2,
   stressLift: 2.5,
   vowelPositions: {},
+  lpRatio: 1.25,
+  lpResonance: 512,
+  lpNasalHz: 350,
 }
 
 function segmentsOf(text: string, dictionary: Pronunciations | null | undefined, tune: Tuning): Segment[] {
@@ -659,8 +669,11 @@ export interface SpeechPatchOptions {
    * Shape the voice with waves instead of the Saw: each wave's harmonicLevels, and the note (Hz) to
    * tune them for. `fixed`: one wave for the whole phrase (the one fitting all its voiced sounds
    * best), so LFO 5 stays free for the melody; else a wave per voiced sound, scanned by LFO 5.
+   * `plain`: no Vowel filter; the waves alone make the vowels, Filter 1 a low-pass (LP Ladder 12)
+   * a little above each sound's F2 (TUNING lpRatio), closed low for m, n, ng. Voice (Formant
+   * Control) has nothing to move then and is left out.
    */
-  waves?: { levels: (number[] | null)[]; f0: number; fixed?: boolean }
+  waves?: { levels: (number[] | null)[]; f0: number; fixed?: boolean; plain?: boolean }
   /** How words are said (loadPronunciations); without it, or for words it lacks, the spelling rules. */
   dictionary?: Pronunciations | null
   /** Overrides of TUNING. */
@@ -689,12 +702,13 @@ const DECAYS: [number, number][] = (() => {
  * per sound, shared when two sounds pick the same one; past eight waves, a sound takes the slot
  * of the sound with the nearest vowel position.
  */
-function waveList(segments: Segment[], levels: (number[] | null)[], f0: number) {
+function waveList(segments: Segment[], levels: (number[] | null)[], f0: number, distinct = false) {
   const waves: number[] = []
   const slotOf = new Map<string, number>()
   for (const s of segments) {
     if (!s.shape || slotOf.has(s.shape)) continue
-    const w = waveFor(s.shape, levels, f0)
+    // `distinct` (no Vowel filter to tell them apart): a wave no other sound has taken yet.
+    const w = waveFor(s.shape, levels, f0, distinct ? waves : [])
     if (waves.includes(w)) slotOf.set(s.shape, waves.indexOf(w))
     else if (waves.length < 8) slotOf.set(s.shape, waves.push(w) - 1)
     else {
@@ -739,10 +753,16 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   p.set('mixerfilterrouting', 1)
   p.set('mixerosc1filterratio', 0)
   p.set('mixernoisefilterratio', 1024)
-  p.set('filter1type', 10)
-  // Formant Control 64, the place every vowel is tuned at, with the Voice macro in its middle.
-  p.set('filter1special', 512 - VOICE_CENTER)
-  p.set('filter1resonance', 576)
+  const plain = !!waves?.plain
+  if (plain) {
+    p.set('filter1type', 0) // LP Ladder 12
+    p.set('filter1resonance', tune.lpResonance)
+  } else {
+    p.set('filter1type', 10)
+    // Formant Control 64, the place every vowel is tuned at, with the Voice macro in its middle.
+    p.set('filter1special', 512 - VOICE_CENTER)
+    p.set('filter1resonance', 576)
+  }
   p.set('filter1keytrack', 512)
   p.set('filter1cutoff', 512)
   p.set('filter2type', 0)
@@ -783,8 +803,8 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     segments.map((s) => s.vowel || s.voice >= 100),
   )
   segments.forEach((s, i) => (s.pos = order.place.get(keys[i])!))
-  p.set('filter1vowelorder', ORDERS.indexOf(order.name))
-  const list = waves && !waves.fixed ? waveList(segments, waves.levels, waves.f0) : null
+  if (!plain) p.set('filter1vowelorder', ORDERS.indexOf(order.name))
+  const list = waves && !waves.fixed ? waveList(segments, waves.levels, waves.f0, plain) : null
   if (waves?.fixed) {
     // Chosen by the vowels: a short word's r or n otherwise weighs as much ("red" got an "er" wave).
     const vowels = segments.filter((s) => s.vowel)
@@ -811,12 +831,15 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   }[] = [
     // Filt 1 Cutoff. The Vowel filter morphs only along its order's vowels: a glide that passes one
     // off its way says it ("very" as "ve-ee-ry"), so such a change jumps.
-    { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, jump: (a, b) => offPath(order.name, 512 + 8 * a, 512 + 8 * b), crisp: true },
+    plain
+      ? // Filt 1 Cutoff as a low-pass, which glides anywhere.
+        { target: 88, depth: 768, value: (s) => (lpRaw(s, tune) - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, crisp: true }
+      : { target: 88, depth: 768, value: (s) => (s.pos! - 512) / 8, glideMs: tune.vowelGlideMs, end: 0, jump: (a, b) => offPath(order.name, 512 + 8 * a, 512 + 8 * b), crisp: true },
     { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0, crisp: true, holds: true }, // Osc 1 Vol
     { target: 77, depth: 1024, value: (s) => s.noise / 2, glideMs: tune.noiseGlideMs, end: 0 }, // Noise Vol
     // Filt 2 Cutoff while noise sounds; while it doesn't, Filter 2 hears nothing and the same curve
     // carries Formant Control (slot 7, depth CONTROL_DEPTH) for the vowels that need it.
-    { target: 96, depth: 768, value: (s) => (s.noise ? (s.band - 512) / 8 : (s.control * 8) / CONTROL_DEPTH), glideMs: Math.max(tune.noiseGlideMs, 1), end: 0 },
+    { target: 96, depth: 768, value: (s) => (s.noise ? (s.band - 512) / 8 : plain ? 0 : (s.control * 8) / CONTROL_DEPTH), glideMs: Math.max(tune.noiseGlideMs, 1), end: 0 },
     stopper
       ? // LFO 1-5 Rate (slots 5 and 11-14): nothing until the end, then all of them to the bottom.
         { target: 144, depth: 0, value: () => 0, glideMs: 0, end: 64 }
@@ -895,10 +918,12 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
       p.set(`modmatrix${9 + i}modtarget`, 142 + 2 * i) // LFO i Rate
       p.set(`modmatrix${9 + i}depth`, 0) // -128
     }
-  // LFO 4 also moves Formant Control: by step * CONTROL_DEPTH / 8 (raw), so +-64 steps is +-128.
-  p.set('modmatrix7modsource', 9) // LFO 4
-  p.set('modmatrix7modtarget', 91) // Filt 1 Control
-  p.set('modmatrix7depth', 512 + CONTROL_DEPTH * 4)
+  if (!plain) {
+    // LFO 4 also moves Formant Control: by step * CONTROL_DEPTH / 8 (raw), so +-64 steps is +-128.
+    p.set('modmatrix7modsource', 9) // LFO 4
+    p.set('modmatrix7modtarget', 91) // Filt 1 Control
+    p.set('modmatrix7depth', 512 + CONTROL_DEPTH * 4)
+  }
 
   if (list) {
     // OSC 1 scans the waves (slots 2-8 store Off and Silence ahead of them; unused ones Off).
@@ -965,10 +990,12 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
 
   // Macro 3, Voice: Formant Control from 48 (larger, deeper) through 64 (as tuned, the default) to
   // 80 (smaller: formants ~18-24 % higher, about a woman's; tools/calibrateSpeech.ts control).
-  p.setMacroName(3, 'Voice')
-  p.set('macro3panelvalue', 512)
-  p.set('macro3target1', 91) // Filt 1 Control
-  p.set('macro3depth1', 512 + VOICE_DEPTH * 4)
+  if (!plain) {
+    p.setMacroName(3, 'Voice')
+    p.set('macro3panelvalue', 512)
+    p.set('macro3target1', 91) // Filt 1 Control
+    p.set('macro3depth1', 512 + VOICE_DEPTH * 4)
+  }
 
   // Macro 4, Whisper: the voice turns into breath. A second noise, the Ring Mod of the noise and
   // OSC 2 (noise times a sine is still noise), goes through the Vowel filter with its own level,
@@ -1011,7 +1038,16 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
 
   // A sound in several parts (a stop's closure and burst, an h or a nasal) is one sound.
   const sounds = segments.map((s) => s.sound).filter((s, i, all) => s === '' || all[i - 1] !== s)
-  return { patch: p, sounds, ms: Math.round(total * t.stepMs), dropped, order: order.name }
+  return { patch: p, sounds, ms: Math.round(total * t.stepMs), dropped, order: plain ? '' : order.name }
+}
+
+/**
+ * Filter 1 Cutoff (raw) of LP Ladder 12, keytrack 0 %, for a sound without the Vowel filter: ~600 Hz
+ * at 512, an octave per ~96 raw (tools/calibrateSpeech.ts cutoff1, TYPE=0: 234 Hz at 384, 4664 at 800).
+ */
+function lpRaw(s: Segment, tune: Tuning): number {
+  const hz = s.sound in NASAL_PLACES ? tune.lpNasalHz : (FORMANTS[s.shape ?? '']?.[1] ?? 2400) * tune.lpRatio
+  return Math.max(0, Math.min(1024, Math.round(512 + 96 * Math.log2(hz / 600))))
 }
 
 /** Depth (of 128) of the Speed macro on the LFO rates: 192 raw over the knob, 96 to either side of the middle. */
