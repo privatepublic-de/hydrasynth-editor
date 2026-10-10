@@ -4,7 +4,8 @@ import { BackupDialog } from './BackupDialog'
 import { RestoreDialog } from './RestoreDialog'
 import { ParamMenu } from './Modulation'
 import { ModuleSelect } from './ModuleSelect'
-import { Pads } from './Pads'
+import { MidiPort, Pads } from './Pads'
+import { PatchHeading } from './PatchHeading'
 import { PatchBar } from './PatchBar'
 import { useEditor } from './store'
 
@@ -62,6 +63,7 @@ export function App() {
     <div className="app">
       <PatchBar />
       <div className="panel">
+        <PatchHeading />
         <div className="panel__select">
           <ModuleSelect />
           <MasterButtons />
@@ -71,6 +73,7 @@ export function App() {
       {/* Pinned to the window's bottom edge, so notes are always at hand while editing. */}
       <footer className="pads-dock">
         <Pads />
+        <MidiPort />
       </footer>
       <ParamMenu />
       <BackupDialog />

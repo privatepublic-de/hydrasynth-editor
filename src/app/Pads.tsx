@@ -85,3 +85,28 @@ export function Pads() {
     </section>
   )
 }
+
+/** The connected port and its channel, beside the pads that play on it. */
+export function MidiPort() {
+  const connection = useEditor((s) => s.connection)
+  const channel = useEditor((s) => s.channel)
+  const setChannel = useEditor((s) => s.setChannel)
+  if (connection.status !== 'connected') return null
+  return (
+    <div className="midi-port">
+      <span className="midi-port__name" title="MIDI port">
+        {connection.port}
+      </span>
+      <label className="midi-port__channel" title={`MIDI channel of ${connection.port}`}>
+        Channel
+        <select value={channel} onChange={(e) => setChannel(Number(e.target.value))}>
+          {Array.from({ length: 16 }, (_, i) => (
+            <option key={i + 1} value={i + 1}>
+              {i + 1}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
+}

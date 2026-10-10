@@ -12,7 +12,24 @@ const PATCHES = 128
  * the left and the chosen bank's patches beside them, plus a search over every bank's names.
  * The panel is a popover, so it shows above modal dialogs too.
  */
-export function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot) => void }) {
+export function SlotPicker({
+  slot,
+  onChange,
+  buttonLabel,
+  icon,
+  disabled,
+  stayOpen,
+}: {
+  slot: Slot
+  onChange: (s: Slot) => void
+  /** Shown on the button instead of the slot and its name: the picker as an action (Open). */
+  buttonLabel?: string
+  /** Before the button label. */
+  icon?: React.ReactNode
+  disabled?: boolean
+  /** Picking a patch leaves the panel open, for browsing (Open); otherwise it closes. */
+  stayOpen?: boolean
+}) {
   const bankNames = useEditor((s) => s.bankNames)
   const loadBankNames = useEditor((s) => s.loadBankNames)
   const connected = useEditor((s) => s.connection.status === 'connected')
@@ -56,7 +73,7 @@ export function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot)
     if (refocus) button.current?.focus()
   }
   const choose = (s: Slot) => {
-    close()
+    if (!stayOpen) close()
     if (s.bank !== slot.bank || s.patch !== slot.patch) onChange(s)
   }
 
@@ -85,6 +102,8 @@ export function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot)
     if (!open) return
     const away = (e: PointerEvent) => {
       const t = e.target as Node
+      // A dialog a pick brings up (discard changes?) is answered without closing the panel.
+      if (stayOpen && (t as Element).closest?.('dialog[open]')) return
       if (!panel.current?.contains(t) && !button.current?.contains(t)) close(false)
     }
     addEventListener('pointerdown', away, true)
@@ -119,14 +138,20 @@ export function SlotPicker({ slot, onChange }: { slot: Slot; onChange: (s: Slot)
       <button
         ref={button}
         type="button"
-        className="slot-picker__button"
+        className={`slot-picker__button${buttonLabel ? ' slot-picker__button--action' : ''}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Patch: ${label}`}
+        aria-label={buttonLabel ? `${buttonLabel} a patch` : `Patch: ${label}`}
+        disabled={disabled}
         onClick={() => (open ? close() : show())}
       >
-        <span className="slot-picker__slot">{slot.patch === NOT_STORED ? '—' : slotName(slot)}</span>
-        <span className="slot-picker__name">{slot.patch === NOT_STORED ? 'Not stored' : (names?.[slot.patch] ?? '')}</span>
+        {icon}
+        {buttonLabel ?? (
+          <>
+            <span className="slot-picker__slot">{slot.patch === NOT_STORED ? '—' : slotName(slot)}</span>
+            <span className="slot-picker__name">{slot.patch === NOT_STORED ? 'Not stored' : (names?.[slot.patch] ?? '')}</span>
+          </>
+        )}
         <span aria-hidden="true">▾</span>
       </button>
       <div

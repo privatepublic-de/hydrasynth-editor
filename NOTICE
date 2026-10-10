@@ -68,3 +68,11 @@ Dictionary (https://github.com/cmusphinx/cmudict):
 
 The speech patch's sound lengths (src/ui/speechPatch.ts LENGTHS) are measured from eSpeak NG's
 output (tools/espeak.ts, tools/espeakTimings.c); eSpeak NG itself is not included.
+
+The icons in src/app/icons.tsx (hard-drive-download, folder-open, circle, menu,
+undo-2, redo-2) are Lucide's
+(https://lucide.dev):
+
+  Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather
+  (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
+  Licensed under the ISC License.

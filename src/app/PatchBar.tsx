@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { BANK_LETTERS } from '../sysex/protocol'
 import { slotName, type Slot } from '../sync/patchSync'
+import { InitIcon, MenuIcon, OpenIcon, RedoIcon, UndoIcon } from './icons'
 import { NOT_STORED, SlotPicker } from './SlotPicker'
 import { SpeechPatchDialog } from './SpeechPatchDialog'
 import { useEditor } from './store'
 
-function WriteDialog({ initial, onClose }: { initial: Slot; onClose: () => void }) {
+export function WriteDialog({ initial, onClose }: { initial: Slot; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null)
   const [slot, setSlot] = useState(initial)
   const write = useEditor((s) => s.write)
@@ -100,9 +101,16 @@ function SynthSwitchedDialog({ slot, onOpen, onKeep }: { slot: Slot; onOpen: () 
   )
 }
 
-/** Less frequent actions: backup and restore. */
-function MoreMenu() {
+/**
+ * Less frequent actions: the speech patch (once a patch is open), and backup and restore (with a
+ * synth connected).
+ */
+function MoreMenu({ withSynth }: { withSynth: boolean }) {
   const [open, setOpen] = useState(false)
+  const [speaking, setSpeaking] = useState(false)
+  const [words, setWords] = useState('hello world')
+  const busy = useEditor((s) => !!s.sync?.busy)
+  const patch = useEditor((s) => s.sync?.patch)
   const openBackup = useEditor((s) => s.openBackup)
   const openRestore = useEditor((s) => s.openRestore)
   const ref = useRef<HTMLSpanElement>(null)
@@ -122,31 +130,59 @@ function MoreMenu() {
   return (
     <span className="more-menu" ref={ref}>
       <button type="button" className="function-button" aria-label="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        ⋯
+        <MenuIcon />
       </button>
       {open && (
         <div className="param-menu more-menu__list" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false)
-              openBackup()
-            }}
-          >
-            Back up the synth…
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false)
-              fileInput.current?.click()
-            }}
-          >
-            Restore from a backup…
-          </button>
+          {patch && (
+            <button
+              type="button"
+              role="menuitem"
+              title="Replaces the patch with one that says a few English words on every note"
+              disabled={busy}
+              onClick={() => {
+                setOpen(false)
+                setSpeaking(true)
+              }}
+            >
+              Generate Speech Patch…
+            </button>
+          )}
+          {withSynth && (
+            <>
+              {patch && <hr />}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false)
+                  openBackup()
+                }}
+              >
+                Back up the synth…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false)
+                  fileInput.current?.click()
+                }}
+              >
+                Restore from a backup…
+              </button>
+            </>
+          )}
         </div>
+      )}
+      {speaking && (
+        <SpeechPatchDialog
+          text={words}
+          onDone={(_, w) => {
+            setSpeaking(false)
+            setWords(w)
+          }}
+        />
       )}
       <input
         ref={fileInput}
@@ -163,32 +199,7 @@ function MoreMenu() {
   )
 }
 
-/** Undo / Redo, named after the step they'd take back or redo. */
-/** Replaces the patch with one that speaks typed words (asks first: it overwrites everything). */
-function SpeechButton() {
-  const [asking, setAsking] = useState(false)
-  const [words, setWords] = useState('hello world')
-  const busy = useEditor((s) => !!s.sync?.busy)
-  const patch = useEditor((s) => s.sync?.patch)
-  if (!patch) return null
-  return (
-    <>
-      <button type="button" className="function-button" title="Make a patch that says a few English words on every note" onClick={() => setAsking(true)} disabled={busy}>
-        Speech…
-      </button>
-      {asking && (
-        <SpeechPatchDialog
-          text={words}
-          onDone={(_, w) => {
-            setAsking(false)
-            setWords(w)
-          }}
-        />
-      )}
-    </>
-  )
-}
-
+/** Undo / Redo as icons; the tooltip names the step they'd take back or redo. */
 function UndoRedo() {
   const undoLabel = useEditor((s) => s.sync?.undoLabel ?? null)
   const redoLabel = useEditor((s) => s.sync?.redoLabel ?? null)
@@ -202,18 +213,20 @@ function UndoRedo() {
         className="function-button"
         onClick={undo}
         disabled={!undoLabel}
+        aria-label="Undo"
         title={undoLabel ? `Undo ${undoLabel} (${mac ? '⌘Z' : 'Ctrl+Z'})` : 'Nothing to undo'}
       >
-        Undo
+        <UndoIcon />
       </button>
       <button
         type="button"
         className="function-button"
         onClick={redo}
         disabled={!redoLabel}
+        aria-label="Redo"
         title={redoLabel ? `Redo ${redoLabel} (${mac ? '⇧⌘Z' : 'Ctrl+Y'})` : 'Nothing to redo'}
       >
-        Redo
+        <RedoIcon />
       </button>
     </span>
   )
@@ -231,11 +244,7 @@ function Status() {
       ? [`${sync.busy}…`, 'busy']
       : sync.pendingFullSend
         ? ['Sending the whole patch in a moment', '']
-        : sync.playing.kind === 'slot'
-          ? [`Playing ${slotName(sync.playing.slot)}`, '']
-          : sync.playing.kind === 'audition'
-            ? ['Playing from H128 (scratch slot)', '']
-            : ['', '']
+        : ['', '']
   return (
     <span className={`status patch-bar__status${kind ? ` status--${kind}` : ''}`} title={text} role="status">
       {text}
@@ -243,24 +252,11 @@ function Status() {
   )
 }
 
-/** Beside the name, with its room always kept so it doesn't move the bar when it appears. */
-function EditedMark() {
-  const dirty = useEditor((s) => !!s.sync?.dirty)
-  return (
-    <span className="edited-mark" title="Edited, not written" aria-hidden={!dirty} style={{ visibility: dirty ? 'visible' : 'hidden' }}>
-      Edited<span className="visually-hidden">, not written</span>
-    </span>
-  )
-}
-
 export function PatchBar() {
   const connection = useEditor((s) => s.connection)
   const connect = useEditor((s) => s.connect)
-  const channel = useEditor((s) => s.channel)
-  const setChannel = useEditor((s) => s.setChannel)
   const open = useEditor((s) => s.open)
   const sync = useEditor((s) => s.sync)
-  const setName = useEditor((s) => s.setName)
   useEditor((s) => s.sync?.revision)
   const [chosen, setChosen] = useState<Slot>({ bank: 0, patch: 0 })
   const [pending, setPending] = useState<Replacement | null>(null)
@@ -269,9 +265,8 @@ export function PatchBar() {
   const initPatch = useEditor((s) => s.initPatch)
   const replace = (next: Replacement) => (next.kind === 'init' ? void initPatch() : void open(next.slot))
   const ask = (next: Replacement) => (sync?.patch && sync.dirty ? setPending(next) : replace(next))
-  const [writing, setWriting] = useState(false)
-  // The selectors show the open patch's slot; while asking or loading, the one picked. A
-  // cancelled or failed open leaves them back on the open patch.
+  // The picker marks the open patch's slot; while asking or loading, the one picked. A
+  // cancelled or failed open leaves it back on the open patch.
   const slot =
     pending?.kind === 'slot'
       ? pending.slot
@@ -282,21 +277,26 @@ export function PatchBar() {
           : (sync?.origin ?? chosen)
   const pick = (next: Slot) => {
     setChosen(next)
-    if (!sync?.patch) return // nothing open yet: the Open button loads it
-    ask({ kind: 'slot', slot: next })
+    // Browsing faster than patches load: the last pick waits for the load in progress.
+    if (sync?.busy) queued.current = next
+    else ask({ kind: 'slot', slot: next })
   }
+  const queued = useRef<Slot | null>(null)
+  useEffect(() => {
+    if (sync?.busy || !queued.current) return
+    const next = queued.current
+    queued.current = null
+    ask({ kind: 'slot', slot: next })
+  }, [sync?.busy])
   const patch = sync?.patch
 
   if (connection.status === 'demo') {
     return (
       <header className="patch-bar">
-        <span className="brand">Hydrasynth editor</span>
-        <span className="status">Demo: a built-in patch, nothing is sent to a synth</span>
-        {patch && (
-          <input className="patch-bar__name" aria-label="Patch name" maxLength={16} value={patch.name} onChange={(e) => setName(e.target.value)} />
-        )}
+        <span className="brand">Hydrasynth Editor</span>
+        <span className="status patch-bar__status">Demo: a built-in patch, nothing is sent to a synth</span>
         <UndoRedo />
-        <SpeechButton />
+        {patch && <MoreMenu withSynth={false} />}
       </header>
     )
   }
@@ -304,7 +304,7 @@ export function PatchBar() {
   if (connection.status !== 'connected') {
     return (
       <header className="patch-bar patch-bar--offline">
-        <span className="brand">Hydrasynth editor</span>
+        <span className="brand">Hydrasynth Editor</span>
         <button type="button" className="function-button function-button--primary" onClick={() => void connect()} disabled={connection.status === 'connecting'}>
           {connection.status === 'connecting' ? 'Connecting…' : 'Connect to the Hydrasynth'}
         </button>
@@ -315,60 +315,26 @@ export function PatchBar() {
 
   return (
     <header className="patch-bar">
-      <span className="brand">Hydrasynth editor</span>
-      <span className="patch-bar__port" title="MIDI port">
-        {connection.port}
-      </span>
-      <label className="patch-bar__channel" title={`MIDI channel of ${connection.port}`}>
-        Channel
-        <select value={channel} onChange={(e) => setChannel(Number(e.target.value))}>
-          {Array.from({ length: 16 }, (_, i) => (
-            <option key={i + 1} value={i + 1}>
-              {i + 1}
-            </option>
-          ))}
-        </select>
-      </label>
-      <SlotPicker slot={slot} onChange={pick} />
-      {!patch && (
-        <button type="button" className="function-button function-button--primary" onClick={() => void open(slot)} disabled={!!sync?.busy}>
-          Open {slotName(slot)}
-        </button>
-      )}
+      <span className="brand">Hydrasynth Editor</span>
+      <SlotPicker slot={slot} onChange={pick} buttonLabel="Open" icon={<OpenIcon />} stayOpen />
       <button
         type="button"
-        className="function-button"
+        className="function-button with-icon"
         title="Start a new patch from the synth's Init patch, played from H128"
         onClick={() => ask({ kind: 'init' })}
         disabled={!!sync?.busy}
       >
+        <InitIcon />
         Init
       </button>
-      {patch && (
-        <>
-          <input
-            className="patch-bar__name"
-            aria-label="Patch name"
-            maxLength={16}
-            value={patch.name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <EditedMark />
-          <button type="button" className="function-button" onClick={() => setWriting(true)} disabled={!!sync?.busy}>
-            Write…
-          </button>
-          <UndoRedo />
-          <SpeechButton />
-        </>
-      )}
       <Status />
       {sync?.synthSwitched && !sync.busy && (
         <button type="button" className="function-button function-button--primary" onClick={() => ask({ kind: 'slot', slot: sync.synthSwitched! })}>
           Open {slotName(sync.synthSwitched)}
         </button>
       )}
-      <MoreMenu />
-      {writing && patch && <WriteDialog initial={sync?.origin ?? chosen} onClose={() => setWriting(false)} />}
+      {patch && <UndoRedo />}
+      <MoreMenu withSynth />
       {sync?.synthSwitched && !sync.busy && sync.synthSwitched !== dismissedSwitch && !pending && (
         <SynthSwitchedDialog
           key={`${sync.synthSwitched.bank}:${sync.synthSwitched.patch}`}

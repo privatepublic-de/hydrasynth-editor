@@ -51,6 +51,8 @@ interface EditorState {
   sync: SyncState | null
   /** Patch names per bank (0-7), loaded on demand. */
   bankNames: Record<number, string[]>
+  /** The slot last opened (or asked for): where Write starts for a patch that isn't stored. */
+  lastSlot: Slot
   module: string
   /** A param to scroll to and highlight (a mod-matrix or macro row), and what to focus there. */
   reveal: { module: string; rowKey: string; focusKey?: string; nonce: number } | null
@@ -138,6 +140,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   channel: storedChannel(),
   sync: null,
   bankNames: {},
+  lastSlot: { bank: 0, patch: 0 },
   module: 'osc1',
   reveal: null,
   menu: null,
@@ -338,6 +341,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   async open(slot) {
+    set({ lastSlot: slot })
     await patchSync?.open(slot).catch(() => undefined) // the error is in sync.error
   },
 

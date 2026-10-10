@@ -58,11 +58,62 @@ input {
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.45);
 }
 
+.pads-dock {
+  display: grid;
+  /* The pads centred and narrow, so they keep roughly the hardware's proportions. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 780px) minmax(0, 1fr);
+  align-items: center;
+}
+
 .pads-dock .pads {
-  /* Narrow, so the pads keep roughly the hardware's proportions. */
-  max-width: 780px;
-  margin: 0 auto;
+  grid-column: 2;
   padding: 10px 34px 12px;
+}
+
+.midi-port {
+  grid-column: 3;
+  justify-self: end;
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  padding-right: 20px;
+  color: var(--print);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.midi-port__channel {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* No room beside the pads: one line above them. */
+@media (max-width: 1150px) {
+  .app {
+    padding-bottom: 190px;
+  }
+
+  .pads-dock {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pads-dock .pads {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    max-width: 780px;
+    justify-self: center;
+  }
+
+  .midi-port {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 6px 20px 0;
+  }
 }
 
 /* --- patch bar: the Main Systems row ------------------------------------ */
@@ -83,14 +134,19 @@ input {
   }
 }
 
-@media (max-width: 1150px) {
-  .patch-bar__port {
-    display: none;
-  }
-}
-
 .patch-bar > * {
   flex-shrink: 0;
+}
+
+/* Every toolbar button one height, whatever it holds (text, a glyph, an icon). Not the
+   buttons of the dialogs the bar opens. */
+.patch-bar > .function-button,
+.patch-bar > * > .function-button,
+.patch-bar .slot-picker__button {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .patch-bar__status {
@@ -104,7 +160,6 @@ input {
 .edited-mark {
   font: 600 13px/1 var(--label);
   color: var(--access);
-  margin-left: -6px;
 }
 
 .brand {
@@ -113,25 +168,49 @@ input {
   margin-right: 8px;
 }
 
-.patch-bar__port {
-  color: var(--print);
-}
 
-.patch-bar__channel {
+/* --- patch heading: what the panel edits ----------------------------------- */
+.patch-heading {
   display: flex;
-  gap: 6px;
   align-items: center;
-  color: var(--print);
+  gap: 10px;
+  /* Pulled into the panel's padding and gap: it's a heading, not a section of its own. */
+  margin: -8px 0 -10px;
 }
 
-.patch-bar__name {
+.patch-heading__write {
+  margin-left: auto;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon {
+  width: 1.1em;
+  height: 1.1em;
+  flex-shrink: 0;
+}
+
+.patch-heading__slot {
+  font: 600 15px/1 var(--label);
+  color: var(--access);
+  min-width: 3ch;
+  cursor: default;
+}
+
+.patch-heading__name {
   background: var(--oled);
   color: var(--oled-text);
   border: 1px solid var(--edge);
   border-radius: 3px;
-  padding: 6px 10px;
+  padding: 3px 8px;
   width: 15ch;
-  font: 600 17px/1 var(--text);
+  font: 600 16px/1 var(--text);
 }
 
 select {
@@ -1254,7 +1333,18 @@ select {
   text-align: left;
 }
 
-.slot-picker__button:hover,
+.slot-picker__button--action {
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.slot-picker__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.slot-picker__button:hover:not(:disabled),
 .slot-picker__button[aria-expanded='true'] {
   border-color: var(--print);
 }
