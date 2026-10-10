@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BANK_LETTERS } from '../sysex/protocol'
 import { slotName, type Slot } from '../sync/patchSync'
+import { AboutDialog } from './AboutDialog'
 import { InitIcon, MenuIcon, OpenIcon, RedoIcon, UndoIcon } from './icons'
 import { NOT_STORED, SlotPicker } from './SlotPicker'
 import { SpeechPatchDialog } from './SpeechPatchDialog'
@@ -102,13 +103,14 @@ function SynthSwitchedDialog({ slot, onOpen, onKeep }: { slot: Slot; onOpen: () 
 }
 
 /**
- * Less frequent actions: the speech patch (once a patch is open), and backup and restore (with a
- * synth connected).
+ * Less frequent actions: the speech patch (once a patch is open), backup and restore (with a
+ * synth connected), and About.
  */
 function MoreMenu({ withSynth }: { withSynth: boolean }) {
   const [open, setOpen] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const [words, setWords] = useState('hello world')
+  const [about, setAbout] = useState(false)
   const busy = useEditor((s) => !!s.sync?.busy)
   const patch = useEditor((s) => s.sync?.patch)
   const openBackup = useEditor((s) => s.openBackup)
@@ -173,8 +175,20 @@ function MoreMenu({ withSynth }: { withSynth: boolean }) {
               </button>
             </>
           )}
+          {(patch || withSynth) && <hr />}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              setAbout(true)
+            }}
+          >
+            About Hydrasynth Editor…
+          </button>
         </div>
       )}
+      {about && <AboutDialog onClose={() => setAbout(false)} />}
       {speaking && (
         <SpeechPatchDialog
           text={words}
@@ -296,7 +310,7 @@ export function PatchBar() {
         <span className="brand">Hydrasynth Editor</span>
         <span className="status patch-bar__status">Demo: a built-in patch, nothing is sent to a synth</span>
         <UndoRedo />
-        {patch && <MoreMenu withSynth={false} />}
+        <MoreMenu withSynth={false} />
       </header>
     )
   }
@@ -309,6 +323,7 @@ export function PatchBar() {
           {connection.status === 'connecting' ? 'Connecting…' : 'Connect to the Hydrasynth'}
         </button>
         {connection.status === 'failed' && <span className="status status--error">{connection.message}</span>}
+        <MoreMenu withSynth={false} />
       </header>
     )
   }

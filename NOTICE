@@ -76,3 +76,18 @@ undo-2, redo-2) are Lucide's
   Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather
   (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
   Licensed under the ISC License.
+
+The fonts Barlow and Barlow Condensed (bundled through @fontsource/barlow and
+@fontsource/barlow-condensed):
+
+  Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
+  Licensed under the SIL Open Font License, Version 1.1 (https://openfontlicense.org)
+
+Bundled libraries, each under the MIT License:
+
+  React, React DOM, scheduler: Copyright (c) Facebook, Inc. and its affiliates.
+  use-sync-external-store: Copyright (c) Meta Platforms, Inc. and affiliates.
+  Zustand: Copyright (c) 2019 Paul Henschel.
+
+Hydrasynth is a trademark of Ashun Sound Machines (ASM). This editor is not affiliated with
+or endorsed by ASM.

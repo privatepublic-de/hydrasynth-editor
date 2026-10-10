@@ -579,6 +579,52 @@ select {
   color: var(--access);
 }
 
+.about-dialog {
+  max-width: 620px;
+  max-height: calc(100vh - 48px);
+}
+
+.about-dialog h3 {
+  font: 600 15px/1.2 var(--label);
+  margin: 16px 0 6px;
+}
+
+.about-dialog a {
+  color: var(--lit);
+}
+
+.about-dialog__meta,
+.about-dialog__license,
+.about-dialog__trademark {
+  color: var(--print);
+}
+
+.about-dialog__credits {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 4px;
+}
+
+.about-dialog details {
+  margin-top: 10px;
+}
+
+.about-dialog summary {
+  cursor: pointer;
+}
+
+.about-dialog__text {
+  white-space: pre-wrap;
+  font-size: 12px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--recess);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 8px 10px;
+}
+
 .write-dialog__actions {
   display: flex;
   justify-content: flex-end;
@@ -1217,6 +1263,8 @@ select {
 /* --- more menu, backup dialog ----------------------------------------------------------- */
 .more-menu {
   position: relative;
+  /* At the bar's right end, also where no status takes the room before it (offline). */
+  margin-left: auto;
 }
 
 .more-menu__list {
