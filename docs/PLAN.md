@@ -74,7 +74,14 @@
   "Twilight ET" (Env 1 attack 1.15 s, decay 2.30 s, sync off): sync on showed 0 / 0, sync
   off again restored 1.15 s / 2.30 s; its NRPN echo reported 5000 / 5016 (625 x 8). A patch
   stores only the active mode's value; the other starts at 0 when loaded. `PatchSync` does
-  the same (`inactiveValues`). FX type and mutant mode are assumed to work alike (unchecked).
+  the same (`inactiveValues`). Mutant mode is assumed to work alike (unchecked).
+- **FX type switches** (captured 2026-10-11, Init): a Pre-/Post-FX type switch loads the type's
+  first preset every time (Chorus edited, Flanger, back to Chorus = Chorus 1 again); the
+  Compressor starts at Ratio 20.0:1, Threshold -32.0 dB, Attack 1 ms, Release 285 ms, Output 128.
+  Dry/Wet stays. Delay and Reverb type switches change none of their other params.
+  `fxTypeValues` in `src/params/fxPresets.ts`.
+- **Reverb Time display is wrong**: Init's 161 reads 1.40s on the synth, Edisyn's table says
+  480ms (Delay Time 424 = 250ms matches).
 - **Arp tempo**: with System "Tempo Lock" on and the clock source USB (the user's settings),
   the synth keeps its own tempo (85.0) whatever the patch says. The UI should say so next to
   the tempo instead of looking broken.
@@ -96,7 +103,7 @@
 
 ## Open questions for the device
 
-- Switching FX type or mutant mode: does the synth keep the other type's values apart too
-  (as for BPM sync), or load defaults/a preset? Today a type never used since loading starts
-  at its params' minimums.
+- Switching mutant mode: does the synth keep the other mode's values apart too (as for BPM
+  sync), or load defaults? Today a mode never used since loading starts at its minimums.
+- The Reverb Time scale on firmware 2.0 (see above).
 

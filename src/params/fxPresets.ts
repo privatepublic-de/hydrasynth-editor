@@ -36,6 +36,26 @@ export function withKnob2Condition(def: ParamDef): ParamDef {
   return m ? { ...def, when: { key: `${m[1]}fxtype`, values: [COMPRESSOR] } } : def
 }
 
+/** The Compressor's starting values (it has no presets), read off the synth's screen after a
+ * switch from Init: Ratio 20.0:1, Threshold -32.0 dB, Attack 1 ms, Release 285 ms, Output 128,
+ * Sidechain off (user, 2026-10-11). */
+const COMPRESSOR_START = [1020, 512, 1, 285, 128]
+
+/**
+ * What the synth sets when the Pre-/Post-FX type changes (`prefxtype` = 1 etc.), by key: the
+ * type's first preset, on every switch -- Chorus edited, Flanger, back to Chorus came back as
+ * Chorus 1 (captured 2026-10-11) -- or the Compressor's starting values. Dry/Wet stays.
+ * Null if `key` isn't an FX type, and for Bypass.
+ */
+export function fxTypeValues(key: string, type: number): Map<string, number> | null {
+  const m = /^(pre|post)fxtype$/.exec(key)
+  if (!m) return null
+  if (type === COMPRESSOR)
+    return new Map([[`${m[1]}fxsidechain`, 0], ...COMPRESSOR_START.map((v, j): [string, number] => [`${m[1]}fx${type}param${j + 1}`, v])])
+  const values = fxPresetValues(`${m[1]}fx${type}preset`, 0)
+  return values ? new Map([[`${m[1]}fx${type}preset`, 0], ...values]) : null
+}
+
 /** The five param values a preset sets, by key, for `prefx7preset` = 6 etc.; null if `key` isn't a preset. */
 export function fxPresetValues(key: string, value: number): [string, number][] | null {
   const m = /^(pre|post)fx(\d)preset$/.exec(key)

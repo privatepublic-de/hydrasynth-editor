@@ -6,6 +6,7 @@
 //    the scratch slot H128 (working memory, no flash write), which is then reloaded;
 //  - write saves to a slot and flash.
 import { incomingParser } from '../midi/incoming'
+import { fxTypeValues } from '../params/fxPresets'
 import { decodeNrpn, encodeNrpn } from '../params/nrpn'
 import { PARAM_BY_KEY, Patch, param } from '../params/patch'
 import type { ParamDef } from '../params/types'
@@ -200,10 +201,12 @@ export class PatchSync {
     // So the outgoing mode's values are kept here, the incoming mode gets what it had
     // before (0 if it never had a value since the patch was loaded), and both are sent.
     // (Changing the mode didn't touch their bytes, so they still hold the outgoing values.)
+    // An FX type is the exception: the synth loads the type's first preset on every switch.
     for (const dep of wasActive) this.inactiveValues.set(dep.key, patch.get(dep.key))
+    const typeValues = fxTypeValues(key, patch.get(key))
     for (const dep of dependents) {
       if (!patch.isActive(dep) || wasActive.has(dep)) continue
-      const v = this.inactiveValues.get(dep.key) ?? 0
+      const v = typeValues?.get(dep.key) ?? this.inactiveValues.get(dep.key) ?? 0
       patch.set(dep.key, Math.max(dep.min, Math.min(dep.max, v)))
       changed.push(dep)
     }

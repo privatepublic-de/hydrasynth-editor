@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatValue } from '../src/params/display'
 import { fxPresetValues } from '../src/params/fxPresets'
+import { initPatchBytes } from '../src/params/initPatch'
 import { Patch, param } from '../src/params/patch'
 import { HydrasynthSession } from '../src/sysex/session'
 import { PatchSync } from '../src/sync/patchSync'
@@ -45,6 +46,33 @@ describe('FX presets', () => {
       ['prefx1param5', 1],
     ])
     expect(fxPresetValues('prefxtype', 1)).toBeNull()
+  })
+
+  it('gives a new FX type its first preset’s values, every time, as the synth does', async () => {
+    const synth = new FakeHydrasynth()
+    const sync = new PatchSync({ session: new HydrasynthSession(synth), channel: 1 })
+    await settle(sync.load(new Patch(initPatchBytes()), { dirty: false }))
+    const chorus1 = [259, 224, 180, 64, 1]
+    const params = () => [1, 2, 3, 4, 5].map((j) => sync.get().patch!.get(`prefx1param${j}`))
+    sync.set('prefxtype', 1)
+    await settle(sync.settled())
+    expect(params()).toEqual(chorus1)
+    expect(synth.nrpns().slice(-5).map(([, v]) => v / 8)).toEqual(chorus1)
+    sync.set('prefx1param1', 900)
+    sync.set('prefxtype', 2)
+    sync.set('prefxtype', 1)
+    expect(params()).toEqual(chorus1)
+    expect(sync.get().patch!.get('prefxwet')).toBe(512) // Dry/Wet stays
+  })
+
+  it('starts the Compressor where the synth does', async () => {
+    const synth = new FakeHydrasynth()
+    const sync = new PatchSync({ session: new HydrasynthSession(synth), channel: 1 })
+    await settle(sync.load(new Patch(initPatchBytes()), { dirty: false }))
+    sync.set('postfxtype', 8)
+    const p = sync.get().patch!
+    expect([1, 2, 3, 4, 5].map((j) => formatValue(param(`postfx8param${j}`), p.get(`postfx8param${j}`)))).toEqual(['20,0:1', '-32,0', '1', '285', '128'])
+    expect(p.get('postfxsidechain')).toBe(0)
   })
 
   it('doesn’t send a preset when the FX type changes, so the synth keeps the values sent', async () => {
