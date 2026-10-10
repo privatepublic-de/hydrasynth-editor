@@ -80,8 +80,8 @@
   Compressor starts at Ratio 20.0:1, Threshold -32.0 dB, Attack 1 ms, Release 285 ms, Output 128.
   Dry/Wet stays. Delay and Reverb type switches change none of their other params.
   `fxTypeValues` in `src/params/fxPresets.ts`.
-- **Reverb Time display is wrong**: Init's 161 reads 1.40s on the synth, Edisyn's table says
-  480ms (Delay Time 424 = 250ms matches).
+- **Reverb and Delay Time display** match the synth (2026-10-11, sent by NRPN): Reverb Time
+  0 = 120 ms, 128 = 400 ms, 161 (Init) = 480 ms, as Edisyn's table; Delay Time 424 = 250 ms.
 - **Arp tempo**: with System "Tempo Lock" on and the clock source USB (the user's settings),
   the synth keeps its own tempo (85.0) whatever the patch says. The UI should say so next to
   the tempo instead of looking broken.
@@ -105,5 +105,4 @@
 
 - Switching mutant mode: does the synth keep the other mode's values apart too (as for BPM
   sync), or load defaults? Today a mode never used since loading starts at its minimums.
-- The Reverb Time scale on firmware 2.0 (see above).
 
