@@ -34,10 +34,10 @@ export function WavelistFill({ osc }: { osc: number }) {
   const fill = async () => {
     if (style !== SPEECH) return write(`Fill OSC ${osc} wavelist`, fillWavelist(style, Math.random, patch.get(key(1))))
     const measured = await waveLevels()
-    if (measured.filter(Boolean).length < WAVE_FEATURES.length) return setSaid("The wave data didn't load")
+    if (measured.filter(Boolean).length < WAVE_FEATURES.length) return setSaid('The wave data didn\u2019t load')
     const speech = speakWavelist(text, measured, PITCHES[pitch].hz, await loadPronunciations())
     if (!speech) return setSaid('Nothing to say')
-    write(`Speak "${text.trim()}" on OSC ${osc}`, speech.waves)
+    write(`Speak “${text.trim()}” on OSC ${osc}`, speech.waves)
     setSaid(speech.sounds.map((s) => s || '·').join(' ') + (speech.dropped ? ` (${speech.dropped} sounds left out)` : ''))
   }
   const description = style === SPEECH ? SPEECH_DESCRIPTION : FILL_STYLES.find((s) => s.id === style)?.description
@@ -86,7 +86,7 @@ export function WavelistFill({ osc }: { osc: number }) {
           onClick={() => setAsking(true)}
           disabled={!text.trim()}
         >
-          Speech patch…
+          Generate speech patch…
         </button>
       )}
       {asking && (

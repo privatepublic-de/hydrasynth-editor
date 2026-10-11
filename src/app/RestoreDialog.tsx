@@ -8,7 +8,7 @@ import { useEditor } from './store'
 const PHASE_TEXT: Record<RestorePhase, string> = {
   reading: 'Reading what’s there now',
   sending: 'Sending',
-  flashing: 'Writing to flash',
+  flashing: 'Writing to flash memory',
   reverting: 'Putting the previous patches back',
   verifying: 'Checking',
 }
@@ -197,7 +197,7 @@ export function RestoreDialog() {
           </p>
           <p className="backup-dialog__note">
             Written to the synth’s flash memory. What’s there now is read first, so you can save it afterwards; if anything goes wrong
-            before the flash write, nothing is saved and the synth keeps what it had.
+            before writing to flash memory, nothing is saved and the synth keeps what it had.
           </p>
           <div className="write-dialog__actions">
             <button type="button" className="function-button" onClick={close}>
@@ -245,7 +245,7 @@ export function RestoreDialog() {
               </p>
             ) : (
               <p>
-                {restore.target} restored and checked: {r.previous.length === 1 ? 'it matches' : `all ${r.previous.length} match`}.
+                Restored and checked {restore.target}: {r.previous.length === 1 ? 'it matches' : `all ${r.previous.length} match`}.
               </p>
             )
           ) : (

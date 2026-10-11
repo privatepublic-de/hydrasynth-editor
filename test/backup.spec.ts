@@ -112,7 +112,7 @@ describe('runBackup', () => {
     const have = new Map<string, StoredPatch>()
     const result = await settle(runBackup({ session, banks: [0], have, onProgress: () => undefined, retryPauseMs: 10 }))
     expect(result.retries).toBe(3)
-    expect(result.stopped).toMatch(/^A6 didn't come through after 3 tries/)
+    expect(result.stopped).toMatch(/^A6 didn’t come through after 3 tries/)
     expect([...have.keys()]).toEqual(['0:0', '0:1', '0:2', '0:3', '0:4'])
 
     // Continuing reads only what is missing.

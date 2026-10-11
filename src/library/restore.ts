@@ -73,7 +73,7 @@ export function patchDifferences(sent: Uint8Array, back: Uint8Array): string[] {
     out.push(`${p.labels.join(' ')} (${p.key}) ${value(sent)} → ${value(back)}`)
   }
   const other = [...Array(sent.length).keys()].filter((i) => i >= 8 && !covered.has(i) && sent[i] !== back[i])
-  if (other.length) out.push(`${other.length} other byte(s) at ${other.slice(0, 6).join(', ')}${other.length > 6 ? '…' : ''}`)
+  if (other.length) out.push(`${other.length} other ${other.length === 1 ? 'byte' : 'bytes'} at ${other.slice(0, 6).join(', ')}${other.length > 6 ? '…' : ''}`)
   return out
 }
 
@@ -98,7 +98,7 @@ export async function runRestore({
     try {
       previous.push({ bank: it.bank, patch: it.patch, bytes: await session.downloadPatch(it.bank, it.patch) })
     } catch (err) {
-      return notWritten(`Couldn't read ${slotLabel(it.bank, it.patch)} first: ${(err as Error).message}. Nothing was sent.`)
+      return notWritten(`Couldn’t read ${slotLabel(it.bank, it.patch)} first: ${(err as Error).message}. Nothing was sent.`)
     }
   }
 
@@ -120,8 +120,8 @@ export async function runRestore({
     const reverted = back.sent === result.sent && !back.error
     return notWritten(
       reverted
-        ? `${why} Nothing was written to flash, and the synth’s working memory has the previous patches back.`
-        : `${why} Nothing was written to flash, but putting the previous patches back into working memory failed: switch the synth off and on to discard the ${result.sent} sent.`,
+        ? `${why} Nothing was written to flash memory, and the synth’s working memory has the previous patches back.`
+        : `${why} Nothing was written to flash memory, but putting the previous patches back into working memory failed: switch the synth off and on to discard the ${result.sent} sent.`,
       reverted,
     )
   }
@@ -160,10 +160,10 @@ export async function runRestore({
       differences,
       filled,
       reason: mismatches.length
-        ? `The synth didn’t confirm the flash write (${result.error?.message ?? 'no reply'}), and ${mismatches.length} slot(s) don’t hold the restored patch: ${mismatches.slice(0, 8).join(', ')}.`
+        ? `The synth didn’t confirm writing to flash memory (${result.error?.message ?? 'no reply'}), and ${mismatches.length === 1 ? 'one slot doesn’t' : `${mismatches.length} slots don’t`} hold the restored patch: ${mismatches.slice(0, 8).join(', ')}.`
         : unchecked.length
-          ? `The synth didn’t confirm the flash write (${result.error?.message ?? 'no reply'}), and the check stopped before ${unchecked.length} slot(s): ${unchecked.slice(0, 8).join(', ')}${unchecked.length > 8 ? '…' : ''}.`
-          : `The synth didn’t confirm the flash write (${result.error?.message ?? 'no reply'}), but every slot reads back as restored.`,
+          ? `The synth didn’t confirm writing to flash memory (${result.error?.message ?? 'no reply'}), and the check stopped before ${unchecked.length === 1 ? 'one slot' : `${unchecked.length} slots`}: ${unchecked.slice(0, 8).join(', ')}${unchecked.length > 8 ? '…' : ''}.`
+          : `The synth didn’t confirm writing to flash memory (${result.error?.message ?? 'no reply'}), but every slot reads back as restored.`,
       unchecked,
     }
   }

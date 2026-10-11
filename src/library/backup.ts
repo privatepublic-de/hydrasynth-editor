@@ -55,7 +55,7 @@ export async function runBackup(o: BackupOptions): Promise<BackupResult> {
           break
         } catch (err) {
           if (attempt >= attempts) {
-            return { stopped: `${BANK_LETTERS[bank]}${patch + 1} didn't come through after ${attempts} tries: ${(err as Error).message}`, retries }
+            return { stopped: `${BANK_LETTERS[bank]}${patch + 1} didn’t come through after ${attempts} tries (${(err as Error).message}).`, retries }
           }
           retries++
           await sleep(o.retryPauseMs ?? 1000)

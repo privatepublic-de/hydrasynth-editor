@@ -344,7 +344,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (editedOffline) void patchSync.audition().catch(() => undefined) // the error is in sync.error
       set({ connection: { status: 'connected', port: ports.output.name ?? 'Hydrasynth' }, sync: patchSync.get() })
     } catch (err) {
-      set({ connection: { status: 'failed', message: `MIDI access was refused or failed: ${(err as Error).message}` } })
+      set({ connection: { status: 'failed', message: `The browser didn\u2019t allow MIDI access (${(err as Error).message}). Allow it for this page, then connect again.` } })
     }
   },
 

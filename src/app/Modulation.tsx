@@ -38,8 +38,9 @@ export function ModBadges({ paramKey }: { paramKey: string }) {
           key={m.kind === 'matrix' ? `r${m.route}` : `m${m.macro}-${m.slot}`}
           type="button"
           className={`mod-badge mod-badge--${m.kind}`}
-          title={`${describe(m, patch)}. Click to show it.`}
-          aria-label={`Modulated by ${describe(m, patch)}. Show it.`}
+          title={`Modulated by ${describe(m, patch)}. Click to show it.`}
+          // Starts with the badge's own text (R3, M1), so it can be named by what it shows.
+          aria-label={`${badgeText(m)}: modulated by ${describe(m, patch)}. Show it.`}
           onClick={() => reveal(m)}
         >
           {badgeText(m)}
@@ -111,7 +112,7 @@ export function ParamMenu() {
             const name = patch.macroName(macro).slice(0, 8).trim()
             return (
               <button key={macro} type="button" role="menuitem" disabled={slot === undefined} onClick={run(() => addToMacro(menu.key, macro))}>
-                Assign to macro {macro}
+                Assign to Macro {macro}
                 {name ? ` (${name})` : ''}
                 {slot === undefined ? ', full' : ''}
               </button>
@@ -122,7 +123,7 @@ export function ParamMenu() {
       {existing.length > 0 && <hr />}
       {existing.map((m) => (
         <button key={badgeText(m) + (m.kind === 'macro' ? m.slot : '')} type="button" role="menuitem" onClick={run(() => reveal(m))}>
-          Show {m.kind === 'matrix' ? `route ${m.route}` : `macro ${m.macro}, slot ${m.slot}`}
+          Show {m.kind === 'matrix' ? `route ${m.route}` : `Macro ${m.macro}, slot ${m.slot}`}
         </button>
       ))}
     </div>

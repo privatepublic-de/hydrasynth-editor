@@ -38,12 +38,12 @@ export function decodeBackup(file: Uint8Array): StoredPatch[] {
   const patches: StoredPatch[] = []
   let parts: Uint8Array[] = []
   for (const [n, m] of messages.entries()) {
-    if (!isHydrasynthSysex(m)) throw new BackupFileError(`message ${n + 1} is not Hydrasynth SysEx`)
+    if (!isHydrasynthSysex(m)) throw new BackupFileError(`part ${n + 1} of the file isn\u2019t Hydrasynth data`)
     const { info, checksumOk } = decodeMessage(m)
-    if (!checksumOk) throw new BackupFileError(`message ${n + 1} has a bad checksum`)
+    if (!checksumOk) throw new BackupFileError(`part ${n + 1} of the file is damaged (bad checksum)`)
     const chunk = parseChunk(info)
     if (!chunk || chunk.kind !== CHUNK_KIND.patch || chunk.index !== parts.length)
-      throw new BackupFileError(`message ${n + 1} is not patch chunk ${parts.length + 1} of ${PATCH_CHUNK_COUNT}`)
+      throw new BackupFileError(`part ${n + 1} of the file is out of order (expected piece ${parts.length + 1} of ${PATCH_CHUNK_COUNT} of a patch)`)
     parts.push(new Uint8Array(chunk.data))
     if (parts.length === PATCH_CHUNK_COUNT) {
       const bytes = new Uint8Array(parts.reduce((t, p) => t + p.length, 0))
@@ -52,16 +52,16 @@ export function decodeBackup(file: Uint8Array): StoredPatch[] {
         bytes.set(p, at)
         at += p.length
       }
-      if (bytes.length !== PATCH_BYTES) throw new BackupFileError(`patch ${patches.length + 1} is ${bytes.length} bytes, not ${PATCH_BYTES}`)
+      if (bytes.length !== PATCH_BYTES) throw new BackupFileError(`patch ${patches.length + 1} has the wrong size (${bytes.length} bytes, not ${PATCH_BYTES})`)
       // Bytes 2-3 name the slot; restore offers it as the target, so it must be a real one.
       const [bank, patch] = [bytes[2], bytes[3]]
       if (bank >= BANK_LETTERS.length || patch >= PATCHES_PER_BANK)
-        throw new BackupFileError(`patch ${patches.length + 1} names a slot the synth doesn\u2019t have (bank ${bank}, patch ${patch})`)
+        throw new BackupFileError(`patch ${patches.length + 1} names a slot the synth doesn\u2019t have (bank ${bank + 1}, patch ${patch + 1})`)
       patches.push({ bank, patch, bytes })
       parts = []
     }
   }
-  if (parts.length) throw new BackupFileError(`the file ends inside a patch (${parts.length} of ${PATCH_CHUNK_COUNT} chunks)`)
+  if (parts.length) throw new BackupFileError(`the file ends inside a patch (${parts.length} of its ${PATCH_CHUNK_COUNT} pieces)`)
   return patches
 }
 

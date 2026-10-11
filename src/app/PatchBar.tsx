@@ -19,7 +19,7 @@ export function WriteDialog({ initial, onClose }: { initial: Slot; onClose: () =
   return (
     <dialog ref={ref} className="write-dialog" onClose={onClose}>
       <h2>Write “{name}”</h2>
-      <p>Saves the patch on the synth and to its flash memory. The synth is busy for about 4 seconds.</p>
+      <p>Writes the patch to the synth and its flash memory. The synth is busy for about 4 seconds.</p>
       <SlotPicker slot={slot} onChange={setSlot} />
       <p className="write-dialog__target">
         {target !== undefined ? `Replaces ${slotName(slot)} “${target}”.` : `Replaces whatever is stored in ${slotName(slot)}.`}
@@ -96,7 +96,7 @@ function SynthSwitchedDialog({ slot, onOpen, onKeep }: { slot: Slot; onOpen: () 
           Keep editing
         </button>
         <button type="button" className="function-button function-button--primary" onClick={onOpen} autoFocus>
-          {dirty ? `Discard changes, open ${slotName(slot)}` : `Open ${slotName(slot)}`}
+          {dirty ? `Discard changes and open ${slotName(slot)}` : `Open ${slotName(slot)}`}
         </button>
       </div>
     </dialog>
@@ -146,14 +146,14 @@ function MoreMenu({ withSynth }: { withSynth: boolean }) {
             <button
               type="button"
               role="menuitem"
-              title="Replaces the patch with one that says a few English words on every note"
+              title="Replace the patch with one that says a few English words on every note"
               disabled={busy}
               onClick={() => {
                 setOpen(false)
                 setSpeaking(true)
               }}
             >
-              Generate Speech Patch…
+              Generate speech patch…
             </button>
           )}
           {withSynth && (
@@ -259,7 +259,7 @@ function Status() {
   const [text, kind] = sync.error
     ? [sync.error, 'error']
     : sync.synthSwitched
-      ? [`Synth is on ${slotName(sync.synthSwitched)}: its knobs no longer change this patch`, 'busy']
+      ? [`The synth is on ${slotName(sync.synthSwitched)}: its knobs no longer change this patch`, 'busy']
       : sync.busy
       ? [`${sync.busy}…`, 'busy']
       : sync.pendingFullSend
@@ -315,7 +315,7 @@ export function PatchBar() {
     return (
       <header className="patch-bar">
         <span className="brand">Hydrasynth Editor</span>
-        <span className="status patch-bar__status">Demo: a built-in patch, nothing is sent to a synth</span>
+        <span className="status patch-bar__status">Demo: a built-in patch; nothing is sent to a synth</span>
         <UndoRedo />
         <MoreMenu withSynth={false} />
       </header>
@@ -353,7 +353,7 @@ export function PatchBar() {
       <button
         type="button"
         className="function-button with-icon"
-        title="Start a new patch from the synth's Init patch, played from H128"
+        title="Start a new patch from the synth’s Init patch, played from H128"
         onClick={() => ask({ kind: 'init' })}
         disabled={!!sync?.busy}
       >

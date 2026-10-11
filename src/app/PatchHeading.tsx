@@ -19,7 +19,7 @@ export function PatchHeading() {
   useEditor((s) => s.sync?.revision)
   if (!patch) return null
   const [tag, where] = demo
-    ? ['Demo', 'A built-in patch: nothing is sent to a synth']
+    ? ['Demo', 'A built-in patch; nothing is sent to a synth']
     : origin
       ? [slotName(origin), `Stored in ${slotName(origin)}; the synth plays it from there`]
       : ['New', 'Not stored in a slot: the synth plays it from H128 (scratch slot)']

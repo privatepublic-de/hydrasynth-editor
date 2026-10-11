@@ -84,7 +84,7 @@ export class HydrasynthSession {
     this.unsubscribe()
     for (const w of this.waiters) {
       clearTimeout(w.timer)
-      w.reject(new Error('session closed'))
+      w.reject(new Error('the connection to the synth closed'))
     }
     this.waiters = []
   }
@@ -286,7 +286,7 @@ export class HydrasynthSession {
         reject,
         timer: setTimeout(() => {
           this.waiters = this.waiters.filter((w) => w !== waiter)
-          reject(new SysexTimeoutError(`no reply within ${timeoutMs} ms`))
+          reject(new SysexTimeoutError(`the synth didn’t answer within ${timeoutMs / 1000} s`))
         }, timeoutMs),
       }
       this.waiters.push(waiter)

@@ -76,7 +76,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
     let patch = speech.patch
     if (SOURCES[source].waves) {
       const levels = await waveLevels()
-      if (levels.filter(Boolean).length < WAVE_FEATURES.length) return onDone("The wave data didn't load", input)
+      if (levels.filter(Boolean).length < WAVE_FEATURES.length) return onDone('The wave data didn\u2019t load', input)
       const waves = { levels, f0: PITCHES[pitch].hz, fixed: SOURCES[source].fixed, plain: SOURCES[source].plain }
       patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary, waves, sing })!.patch
     }
@@ -96,7 +96,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
 
   return (
     <dialog ref={ref} className="write-dialog speech-dialog" onCancel={() => onDone('', input)}>
-      <h2>Generate Speech Patch</h2>
+      <h2>Generate speech patch</h2>
       <p>
         Replaces all of “{name}” with a patch that says the words on every note.
         {demo ? '' : ' Can’t be undone.'}
@@ -108,7 +108,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
       </label>
       <label
         className="speech-dialog__field"
-        title="Waves whose harmonics already show the sounds' formants: clearer vowels around the chosen note, less so far from it. A wave per sound changes with each sound but has no melody on its syllables. Without the Vowel filter, only the waves make the vowels: they hold near the chosen note and lose them an octave away."
+        title="Waves whose harmonics already show the sounds’ formants: clearer vowels around the chosen note, less so far from it. A wave per sound changes with each sound but has no melody on its syllables. Without the Vowel filter, only the waves make the vowels: they hold near the chosen note and lose them an octave away."
       >
         Voice
         <select value={source} onChange={(e) => choose({ source: Number(e.target.value) })}>
@@ -119,7 +119,12 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
           ))}
         </select>
         <span className="speech-dialog__nowrap">tuned for</span>
-        <select value={pitch} onChange={(e) => choose({ pitch: Number(e.target.value) })} disabled={!SOURCES[source].waves}>
+        <select
+          aria-label="Tuned for"
+          value={pitch}
+          onChange={(e) => choose({ pitch: Number(e.target.value) })}
+          disabled={!SOURCES[source].waves}
+        >
           {PITCHES.map((p, i) => (
             <option key={p.label} value={i}>
               {p.label}
@@ -139,14 +144,14 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
       </label>
       <label
         className="speech-dialog__field"
-        title="Mono: the keys give the pitch, no melody. Play legato and the phrase goes on at the new note (a short glide between them); let go and the next note starts it again. A phrase ending on a vowel holds it. With a wave per sound, steps are coarser and holding past twice the phrase starts it over. The Mod Wheel (or Macro 5, Freeze) stops the phrase on its current sound while it's up."
+        title="Mono: the keys give the pitch, no melody. Play legato and the phrase goes on at the new note (a short glide between them); let go and the next note starts it again. A phrase ending on a vowel holds it. With a wave per sound, steps are coarser and holding past twice the phrase starts it over. The Mod Wheel (or Macro 5, Freeze) stops the phrase on its current sound while it’s up."
       >
         <input type="checkbox" checked={sing} onChange={(e) => choose({ sing: e.target.checked })} />
         Sing: Mono, play legato over the phrase
       </label>
       <p className="speech-dialog__said" title={routing}>
         {speech
-          ? `Hold a note ${(speech.ms / 1000).toFixed(1)} s${speech.dropped ? ` (${speech.dropped} sounds cut)` : ''}: ${speech.sounds.map((s) => s || '·').join(' ')}`
+          ? `Hold a note ${(speech.ms / 1000).toFixed(1)} s${speech.dropped ? ` (${speech.dropped} sounds left out)` : ''}: ${speech.sounds.map((s) => s || '·').join(' ')}`
           : 'Nothing to say'}
       </p>
       <div className="write-dialog__actions">
