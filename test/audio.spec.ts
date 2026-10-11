@@ -150,3 +150,82 @@ describe('analyse', () => {
     expect(wobble(Array.from(noise(1).subarray(0, 100)), 0.02, 0.01)?.depth ?? 0).toBeLessThan(0.5)
   })
 })
+
+describe('dirt', () => {
+  const mix = (...parts: Float32Array[]) => parts[0].map((_, i) => parts.reduce((sum, p) => sum + p[i], 0))
+  const dirtOf = (x: Float32Array) => analyse({ samples: x, sampleRate: RATE }).dirt
+
+  it('reads a clean note as clean, at any pitch', () => {
+    for (const f0 of [55, 130.81, 440]) {
+      const d = dirtOf(tone(f0, sawAmps(f0), 2))
+      expect(d.drift, `${f0} Hz`).toBeLessThan(0.5)
+      expect(d.detune).toBeNull()
+      expect(d.ensemble).toBeNull()
+      expect(d.noise?.db ?? -100).toBeLessThan(-50)
+    }
+  })
+
+  it('takes neither a decay with a filter sweep nor vibrato for dirt', () => {
+    // Each harmonic fades the faster the higher it is: a pluck closing its filter.
+    const pluck = new Float32Array(2 * RATE)
+    for (let k = 1; k <= 30; k++) {
+      const part = tone(130.81 * k, [0.5 / k], 2, { level: (t) => Math.exp(-t * (0.5 + k * 0.4)) })
+      for (let i = 0; i < pluck.length; i++) pluck[i] += part[i]
+    }
+    const d = dirtOf(pluck)
+    expect(d.detune).toBeNull()
+    expect(d.ensemble).toBeNull()
+    expect(d.drift).toBeLessThan(0.5)
+    const vib = dirtOf(tone(220, sawAmps(220), 2, { cents: (t) => 25 * Math.sin(2 * Math.PI * 5 * t) }))
+    expect(vib.drift).toBeLessThan(1.5)
+    expect(vib.detune).toBeNull()
+  })
+
+  it('hears a second saw 6 cents off as detune', () => {
+    const f0 = 130.81
+    const d = dirtOf(mix(tone(f0, sawAmps(f0), 2.5), tone(f0 * 2 ** (6 / 1200), sawAmps(f0), 2.5)))
+    expect(d.detune).not.toBeNull()
+    expect(d.detune!.cents).toBeGreaterThan(4.5)
+    expect(d.detune!.cents).toBeLessThan(7.5)
+  })
+
+  it('follows a pitch that wanders', () => {
+    // A slow random walk, a few cents to either side.
+    let s = 1
+    const walk = Array.from({ length: 60 }, () => ((s = (s * 16807) % 2147483647) / 2147483647 - 0.5) * 8)
+    const at = (t: number) => {
+      const i = Math.min(walk.length - 2, Math.floor(t * 20))
+      const f = t * 20 - i
+      return walk[i] * (1 - f) + walk[i + 1] * f
+    }
+    expect(dirtOf(tone(220, sawAmps(220), 2.5, { cents: at })).drift).toBeGreaterThan(1.5)
+  })
+
+  it('hears noise between the harmonics, and its colour', () => {
+    const f0 = 220
+    const white = noise(2)
+    const level = (db: number, x: Float32Array) => x.map((v) => v * 10 ** (db / 20))
+    const w = dirtOf(mix(tone(f0, sawAmps(f0), 2), level(-12, white)))
+    expect(w.noise).not.toBeNull()
+    expect(w.noise!.db).toBeGreaterThan(-40)
+    expect(Math.abs(w.noise!.slope)).toBeLessThan(1.5)
+    // Pink: white through a -3 dB/octave filter (Paul Kellet's).
+    let [b0, b1, b2, b3, b4, b5, b6] = [0, 0, 0, 0, 0, 0, 0]
+    const pink = white.map((v) => {
+      b0 = 0.99886 * b0 + v * 0.0555179
+      b1 = 0.99332 * b1 + v * 0.0750759
+      b2 = 0.969 * b2 + v * 0.153852
+      b3 = 0.8665 * b3 + v * 0.3104856
+      b4 = 0.55 * b4 + v * 0.5329522
+      b5 = -0.7616 * b5 - v * 0.016898
+      const out = b0 + b1 + b2 + b3 + b4 + b5 + b6 + v * 0.5362
+      b6 = v * 0.115926
+      return out * 0.2
+    })
+    const p = dirtOf(mix(tone(f0, sawAmps(f0), 2), level(-6, pink)))
+    expect(p.noise).not.toBeNull()
+    expect(p.noise!.slope).toBeLessThan(-1.5)
+    expect(p.noise!.slope).toBeGreaterThan(-4.5)
+  })
+})
+

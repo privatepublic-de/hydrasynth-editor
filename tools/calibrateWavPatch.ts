@@ -17,6 +17,10 @@
 //   macro      a macro (depth 32) at knobs 0..128 on Filt 1 Cutoff, and on Matrix 1 Depth with ENV 3
 //              (held full) routed to Filt 1 Cutoff at depth 0: where the cutoff goes, in raw
 //   mixer      a Sine on OSC 2 alone at Osc 2 Vol 128..16: its level (dB) against 128
+//   dirt       through src/audio/dirt.ts, on a Saw at C3: Analog Feel 0..127 (drift), the noise at
+//              Noise Vol 128..32 and each Noise Type (level under the Saw, slope), Pre-FX Chorus at
+//              rates and depths (ensemble), OSC 3 a Saw some cents up at two volumes (detune)
+//   drift      a Random LFO 3 (1.5 Hz, Smooth 127) on All Osc Pitch and Osc 1 Pitch at route depths 4..16, on a Saw at C3: drift (cents)
 //   tremolo    a Sine LFO 2 at 4 Hz through Amp LFO 2 Amount +16: dB to either side
 // Usage: npx vite-node tools/calibrateWavPatch.ts <experiment>
 import { analyse } from '../src/audio/analyse'
@@ -25,7 +29,7 @@ import { formatValue } from '../src/params/display'
 import { initPatchBytes } from '../src/params/initPatch'
 import { Patch, param } from '../src/params/patch'
 import { destinationOf } from '../src/ui/modDestinations'
-import { labelNumber } from '../src/ui/timeTables'
+import { labelNumber, rawFor } from '../src/ui/timeTables'
 import { lpDb } from '../src/ui/wavPatch'
 import { openSynth } from './synthTake'
 import { RATE } from './waveAudio'
@@ -261,6 +265,56 @@ async function main() {
         const db = level(await synth.take(p, 48, 1))
         if (vol === 1024) full = db
         console.log(`Osc 2 Vol ${show('mixerosc2vol', vol)}: ${(db - full).toFixed(1)} dB (linear ${(20 * Math.log10(vol / 1024)).toFixed(1)})`)
+      }
+    } else if (experiment === 'dirt') {
+      const note = 48
+      const read = async (p: Patch, hold = 2.5) => analyse({ samples: f32(await synth.take(p, note, hold)), sampleRate: RATE }).dirt
+      const fmt = (d: Awaited<ReturnType<typeof read>>) =>
+        `drift ${d.drift.toFixed(1)} c, detune ${d.detune ? `${d.detune.cents.toFixed(1)} c ${d.detune.depth.toFixed(1)} dB` : '-'}, ensemble ${d.ensemble ? `${d.ensemble.rateHz.toFixed(1)} Hz ${d.ensemble.depth.toFixed(1)} dB` : '-'}, noise ${d.noise ? `${d.noise.db.toFixed(1)} dB ${d.noise.slope.toFixed(1)}/oct` : '-'}`
+      for (const feel of [0, 32, 64, 127]) {
+        const p = sawPatch()
+        p.set('voiceanalogfeel', feel)
+        console.log(`Analog Feel ${feel}: ${fmt(await read(p))}`)
+      }
+      for (const vol of [1024, 512, 256]) {
+        const p = sawPatch()
+        p.set('mixernoisevol', vol)
+        console.log(`Noise Vol ${show('mixernoisevol', vol)} (White): ${fmt(await read(p))}`)
+      }
+      for (let type = 1; type <= 6; type++) {
+        const p = sawPatch()
+        p.set('mixernoisevol', 1024)
+        p.set('noisetype', type)
+        console.log(`Noise Type ${show('noisetype', type)} at 128: ${fmt(await read(p))}`)
+      }
+      for (const [rate, depth] of [[1, 512], [5, 512], [5, 256], [5, 1024]]) {
+        const p = sawPatch()
+        p.set('prefxtype', 1) // Chorus
+        p.set('prefx1param1', rawFor('prefx1param1', rate))
+        p.set('prefx1param2', depth)
+        p.set('prefxwet', 512)
+        console.log(`Chorus ${show('prefx1param1', p.get('prefx1param1'))} Hz, depth ${show('prefx1param2', depth)}, wet 50 %: ${fmt(await read(p))}`)
+      }
+      for (const vol of [1024, 512]) {
+        const p = sawPatch()
+        p.set('osc3type', 3)
+        p.set('osc3cent', 6)
+        p.set('mixerosc3vol', vol)
+        console.log(`OSC 3 Saw +6 cents at Vol ${show('mixerosc3vol', vol)}: ${fmt(await read(p))}`)
+      }
+    } else if (experiment === 'drift') {
+      for (const [target, quarter] of [[19, 16], [19, 32], [19, 64], [11, 16], [11, 32]]) {
+        const p = sawPatch()
+        p.set('lfo3wave', 9) // Random
+        p.set('lfo3bpmsync', 0)
+        p.set('lfo3ratesyncoff', rawFor('lfo3ratesyncoff', 1.5))
+        p.set('lfo3smooth', 127)
+        p.set('lfo3level', 1024)
+        p.set('modmatrix1modsource', 8) // LFO 3
+        p.set('modmatrix1modtarget', target)
+        p.set('modmatrix1depth', 512 + quarter)
+        const d = analyse({ samples: f32(await synth.take(p, 48, 3)), sampleRate: RATE }).dirt
+        console.log(`${show('modmatrix1modtarget', target)} at depth ${quarter / 4}: drift ${d.drift.toFixed(1)} c`)
       }
     } else if (experiment === 'tremolo') {
       for (const amount of [576, 640, 768, 1024]) {

@@ -11,7 +11,7 @@ import { harmonicAmps, harmonicLevels } from '../src/ui/waveSpeech'
 import { FM_CALIBRATION } from '../src/ui/fmModel'
 import { destinationOf } from '../src/ui/modDestinations'
 import { buildWavPatch, CALIBRATION, distance, fitFm, fitWave, wavStatus } from '../src/ui/wavPatch'
-import { RATE, sawAmps, tone } from './signals'
+import { noise, RATE, sawAmps, tone } from './signals'
 
 const data = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8'))
 const cycles: (Float32Array | null)[] = data.waves.map((w: { cycle: string } | null) => w && decodeCycle(w.cycle))
@@ -165,7 +165,10 @@ describe('buildWavPatch', () => {
 
   it('puts what to shape next on macros, each knob where the patch is', () => {
     const w = buildWavPatch(saw, { levels })
-    expect(w.macros).toEqual(['Bright', 'Resonance', 'Attack', 'Release'])
+    expect(w.macros).toEqual(['Bright', 'Resonance', 'Attack', 'Release', 'Dirt'])
+    expect(show(w.patch, 'macro5target1')).toBe('Filt 1 Drive')
+    expect(w.patch.get('macro5panelvalue')).toBe(0)
+    expect(show(w.patch, 'filter1drive')).toBe('0.0')
     expect(w.patch.macroName(1)).toBe('Bright')
     expect(show(w.patch, 'macro1target1')).toBe('Filt 1 Cutoff')
     expect(show(w.patch, 'macro3target1')).toBe('Env 2 Attack')
@@ -175,10 +178,10 @@ describe('buildWavPatch', () => {
     expect(w.patch.get('macro2panelvalue')).toBe(0)
     // With movement over time, a fifth: none at the bottom, as generated in the middle.
     const fm = buildWavPatch(analyse({ samples: fmTone(220, 2, (t) => 128 + 512 * Math.max(0, 1 - t / 0.6), 1.2), sampleRate: RATE }), { levels, source: 'fm' })
-    expect(fm.macros).toEqual(['Bright', 'Timbre', 'Attack', 'Release', 'Movement'])
+    expect(fm.macros).toEqual(['Bright', 'Timbre', 'Attack', 'Release', 'Dirt', 'Movement'])
     expect(show(fm.patch, 'macro2target1')).toMatch(/Mut.*1.*Depth/)
     expect(fm.patch.get('modmatrix1depth')).toBe(512)
-    expect(fm.patch.get('macro5panelvalue')).toBe(512)
+    expect(fm.patch.get('macro6panelvalue')).toBe(512)
   })
 
   it('plays: velocity on the Amp and the filter, aftertouch on the cutoff', () => {
@@ -204,6 +207,39 @@ describe('buildWavPatch', () => {
     // With its fundamental there, none; nor without the waves' loudness.
     expect(buildWavPatch(saw, { levels, peaks }).sub).toBe(false)
     expect(buildWavPatch(a, { levels: only, overTime: false }).sub).toBe(false)
+  })
+
+  it('plays the dirt it finds: noise, a second voice some cents off, a pitch that wanders', () => {
+    const mix = (...parts: Float32Array[]) => parts[0].map((_, i) => parts.reduce((sum, q) => sum + q[i], 0))
+    const f0 = 220
+    const clean = buildWavPatch(analyse({ samples: tone(f0, sawAmps(f0), 2), sampleRate: RATE }), { levels })
+    expect(clean.dirt).toEqual({ noise: null, drift: null, detune: null })
+    expect(clean.patch.get('mixernoisevol')).toBe(0)
+
+    const noisy = buildWavPatch(analyse({ samples: mix(tone(f0, sawAmps(f0), 2), noise(2).map((v) => v * 0.25)), sampleRate: RATE }), { levels })
+    expect(noisy.dirt.noise).toBe('White')
+    expect(noisy.patch.get('mixernoisevol')).toBeGreaterThan(0)
+    expect(wavStatus(noisy)).toContain('white noise')
+    const noisyAnalysis = analyse({ samples: mix(tone(f0, sawAmps(f0), 2), noise(2).map((v) => v * 0.25)), sampleRate: RATE })
+    expect(buildWavPatch(noisyAnalysis, { levels, dirt: false }).dirt.noise).toBeNull()
+
+    const twin = buildWavPatch(analyse({ samples: mix(tone(130.81, sawAmps(130.81), 2.5), tone(130.81 * 2 ** (6 / 1200), sawAmps(130.81), 2.5)), sampleRate: RATE }), { levels })
+    expect(twin.dirt.detune).toBeGreaterThanOrEqual(4)
+    expect(show(twin.patch, 'osc3type')).toBe(show(twin.patch, 'osc1type'))
+    expect(twin.patch.get('osc3cent')).toBe(-twin.patch.get('osc1cent'))
+    expect(twin.patch.get('mixerosc3vol')).toBeGreaterThan(512)
+
+    let seed = 1
+    const walk = Array.from({ length: 60 }, () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 12)
+    const at = (t: number) => {
+      const i = Math.min(walk.length - 2, Math.floor(t * 20))
+      return walk[i] + (walk[i + 1] - walk[i]) * (t * 20 - i)
+    }
+    const drifting = buildWavPatch(analyse({ samples: tone(f0, sawAmps(f0), 2.5, { cents: at }), sampleRate: RATE }), { levels })
+    expect(drifting.dirt.drift).toBeGreaterThan(0)
+    expect(show(drifting.patch, 'modmatrix6modsource')).toBe('LFO 3')
+    expect(show(drifting.patch, 'modmatrix6modtarget')).toBe('All Osc Pitch')
+    expect(show(drifting.patch, 'lfo3wave')).toBe('Random')
   })
 
   it('names what may be off in the status', () => {

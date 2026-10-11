@@ -1,6 +1,7 @@
 // What a recorded note is made of, for building a patch that plays it (src/ui/wavPatch.ts): its
 // pitch, its harmonics at its loudest and how they change, its level's shape (attack, decay,
 // sustain, release) and any vibrato or tremolo. Pure: samples in, numbers out.
+import { type Dirt, measureDirt } from './dirt'
 import { detectPeriod, noteOf, periodNear, refinePeriod } from './pitch'
 import { harmonicCount, harmonicsAt, type Harmonics } from './spectrum'
 import type { Audio } from './wav'
@@ -50,6 +51,8 @@ export interface SoundAnalysis {
   adsr: Adsr
   vibrato: Wobble | null
   tremolo: Wobble | null
+  /** Drift, detune, chorus and noise: what makes it less clean than a wave played still. */
+  dirt: Dirt
   /** Why the result may not be close, for the status line. */
   warnings: string[]
 }
@@ -136,6 +139,7 @@ export function analyse(audio: Audio): SoundAnalysis {
     levelTrack.push(db(Math.sqrt(s / cycles) / peak))
   }
 
+  const vibrato = wobble(pitchTrack, WOBBLE_HOP_S, 8)
   return {
     sampleRate: sr,
     f0,
@@ -150,8 +154,9 @@ export function analyse(audio: Audio): SoundAnalysis {
     frames,
     // The attack on the finer curve: two periods of a low note would smear a fast one.
     adsr: adsrOf(rel, ip, iEnd, held, attackOf(first)),
-    vibrato: wobble(pitchTrack, WOBBLE_HOP_S, 8),
+    vibrato,
     tremolo: wobble(levelTrack, WOBBLE_HOP_S, 1),
+    dirt: measureDirt(x, sr, f0, spectrum.amps, bodyFrom, bodyTo, vibrato?.rateHz ?? null),
     warnings,
   }
 }

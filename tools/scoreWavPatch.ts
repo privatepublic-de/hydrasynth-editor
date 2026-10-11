@@ -78,6 +78,9 @@ async function main() {
       console.log(`                      synth ${gb.slice(0, n).map((v) => v.toFixed(1)).join(' ')}`)
       const [ta, ga] = [target.adsr, got.adsr]
       console.log(`  attack ${ms(ta.attackS)} / ${ms(ga.attackS)}, decay ${ms(ta.decayS)} / ${ms(ga.decayS)}, sustain ${ta.sustain.toFixed(2)} / ${ga.sustain.toFixed(2)}, release ${ms(ta.releaseS)} / ${ms(ga.releaseS)}`)
+      const dirt = (d: SoundAnalysis['dirt']) =>
+        `drift ${d.drift.toFixed(1)} c, detune ${d.detune ? `${d.detune.cents.toFixed(1)} c` : '-'}, noise ${d.noise ? `${d.noise.db.toFixed(0)} dB ${d.noise.slope.toFixed(1)}/oct` : '-'}`
+      console.log(`  dirt: wav ${dirt(target.dirt)} / synth ${dirt(got.dirt)}`)
       console.log(`  pitch ${target.f0.toFixed(1)} / ${got.f0.toFixed(1)} Hz, vibrato ${JSON.stringify(target.vibrato)} / ${JSON.stringify(got.vibrato)}, tremolo ${JSON.stringify(target.tremolo)} / ${JSON.stringify(got.tremolo)}`)
       console.log(`  -> ${out}`)
     }

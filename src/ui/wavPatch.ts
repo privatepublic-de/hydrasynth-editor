@@ -16,8 +16,12 @@
 //   LFO 1      vibrato found in the note (route 2 to Osc 1 Pitch), else the Voice's own vibrato,
 //              which plays with the Mod Wheel up
 //   LFO 2      tremolo found in the note (the Amp's own LFO 2 Amount)
+//   Dirt       as recorded (src/audio/dirt.ts): noise between the harmonics on the noise source in
+//              the nearest colour, past Filter 1; a pitch that wanders on a Random LFO 3 (route 6, All Osc Pitch);
+//              a second voice some cents off on OSC 3, the same wave, OSC 1 as far the other way
 //   Macros     1 Bright (Filt 1 Cutoff), 2 Timbre (FM Depth, WaveScan, or Resonance on one wave),
-//              3 Attack and 4 Release (ENV 2), 5 Movement (how far ENV 1 or 3 moves things), each
+//              3 Attack and 4 Release (ENV 2), Movement (how far ENV 1 or 3 moves things) and Dirt
+//              (Filter 1 Drive, from none: a recording's saturation is in its harmonics already), each
 //              knob in its middle (or at an end) where the patch is as generated: a starting point
 //   Playing    velocity scales the Amp envelope and opens the filter (ENV 1's amount, or route 3
 //              to Filt 1 Cutoff); aftertouch, channel or poly (routes 4 and 5), opens it further
@@ -25,9 +29,11 @@
 // measured once at C2 (src/ui/waveSpeech.ts waveLevels), compare with the note's at its own pitch.
 // Measured on a Hydrasynth Desktop (fw 2.x) with tools/calibrateWavPatch.ts; see CALIBRATION.
 import type { Adsr, SoundAnalysis, Wobble } from '../audio/analyse'
+import { detuneLevel } from '../audio/dirt'
 import { noteName } from '../audio/pitch'
+import { formatValue } from '../params/display'
 import { initPatchBytes } from '../params/initPatch'
-import { Patch } from '../params/patch'
+import { Patch, param } from '../params/patch'
 import { FM_CALIBRATION, FM_DEPTHS, FM_RATIOS, fmLevels } from './fmModel'
 import { destinationOf } from './modDestinations'
 import { rawFor } from './timeTables'
@@ -63,6 +69,22 @@ export const CALIBRATION = {
   lfoPitchCents: 1142,
   /** Amp LFO 2 Amount: a full Sine LFO 2 swings the amplitude by this share at +64, linearly (tremolo: +16 1.5 dB, +32 3.5 dB). */
   tremoloSwing: 0.75,
+  /**
+   * The noise source against a Saw on OSC 1, both at Vol 128 (dirt): its level (dB) and slope
+   * (dB an octave) per Noise Type, through src/audio/dirt.ts; Noise Vol sets the amplitude as its
+   * square, as the oscillators' (64: 11.4 dB under 128, 32: 23.5).
+   */
+  noise: [
+    { type: 0, slope: 0, db: -1.9 }, // White
+    { type: 1, slope: -3.0, db: -1.7 }, // Pink
+    { type: 2, slope: -5.9, db: -5.8 }, // Brown
+    { type: 4, slope: 1.7, db: -3.3 }, // Blue
+    { type: 5, slope: 5.6, db: -0.2 }, // Violet
+  ],
+  /** The noise into Filter 2 (Noise filter ratio 0:100), open in Series: past Filter 1's cutoff (noiseroute: at Cutoff 384 -12.4 dB as open, against -29.2 through it). */
+  noiseRoute: 1024,
+  /** A Random LFO (1.5 Hz, Smooth 127) on All Osc Pitch: cents of drift per route depth (drift: 4.9 at 4, 8.9 at 8; Analog Feel drifts none within a note). */
+  driftCentsPerDepth: 1.15,
   /** The Voice's own vibrato only plays with the Mod Wheel up: cents to either side per Amount raw (vibrato: 0.5 47, 2.0 186). */
   voiceVibratoCentsPerRaw: 9.3,
 }
@@ -95,6 +117,8 @@ export interface WavPatchOptions {
   overTime?: boolean
   /** Vibrato and tremolo as found in the note. */
   wobble?: boolean
+  /** Drift, detune and noise as recorded (dirt). */
+  dirt?: boolean
   name?: string
 }
 
@@ -104,6 +128,8 @@ export interface WavPatch {
   note: string
   /** The waves played, in WaveScan order (one: no WaveScan; none with FM). */
   waves: number[]
+  /** What of the recording's dirt the patch plays: its noise's colour, drift and detune (cents). */
+  dirt: { noise: string | null; drift: number | null; detune: number | null }
   /** OSC 2 plays a Sine under the wave. */
   sub: boolean
   /** Mutant FM instead: its Ratio, Depth (raw) and whether ENV 3 moves the Depth. */
@@ -301,6 +327,12 @@ function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: numbe
   return gain / frames.length >= SCAN_GAIN ? { waves, spanS } : null
 }
 
+/**
+ * How much dirt a recording needs before the patch plays it: more than a clean synth recording
+ * reads (noise -55..-70 dB, drift under 1 cent, 2-3 where a filter or WaveScan moves the phase).
+ */
+const DIRT = { noiseDb: -50, driftCents: 2.5, driftMaxCents: 8, detuneCents: 2 }
+
 /** The Sine (wave 0), and how far (dB) a wave's fundamental may fall short before OSC 2 plays one under it. */
 const SINE = 0
 const SUB_GAP = 6
@@ -324,7 +356,7 @@ function setEnvelope(p: Patch, n: number, adsr: Adsr, amp: boolean) {
 /** The Init patch turned into one that plays the note in `a`. */
 export function buildWavPatch(
   a: SoundAnalysis,
-  { levels, peaks, source = 'waves', envelope = 'detect', overTime = true, wobble = true, name = '' }: WavPatchOptions,
+  { levels, peaks, source = 'waves', envelope = 'detect', overTime = true, wobble = true, dirt = true, name = '' }: WavPatchOptions,
 ): WavPatch {
   const p = new Patch(initPatchBytes())
   p.name = name.slice(0, 16)
@@ -444,6 +476,42 @@ export function buildWavPatch(
     p.set('amplfo2amount', clamp(Math.round(512 + (512 * swing) / CALIBRATION.tremoloSwing), 512))
   }
 
+  // Dirt, as recorded, where it's clearly more than a clean synth recording shows.
+  const added: WavPatch['dirt'] = { noise: null, drift: null, detune: null }
+  if (dirt) {
+    const { noise, drift, detune, ensemble } = a.dirt
+    // Not on inharmonic sounds: what lies between their harmonics is partials, not noise.
+    if (noise && noise.db >= DIRT.noiseDb && !a.warnings.includes('inharmonic or noisy')) {
+      // The colour nearest its slope, at the level that puts it as far under the harmonics.
+      const colour = CALIBRATION.noise.reduce((x, c) => (Math.abs(c.slope - noise.slope) < Math.abs(x.slope - noise.slope) ? c : x))
+      p.set('noisetype', colour.type)
+      p.set('mixernoisevol', clamp(Math.round(1024 * 10 ** ((noise.db - colour.db) / 40))))
+      // Past Filter 1, into Filter 2 (open in Series): a recording's hiss isn't filtered with the note (noiseroute).
+      p.set('mixernoisefilterratio', CALIBRATION.noiseRoute)
+      added.noise = formatValue(param('noisetype'), colour.type)
+    }
+    if (detune && detune.cents >= DIRT.detuneCents && !useFm) {
+      // OSC 3 the same wave, the two apart by the detune either side of the note.
+      const half = Math.min(25, detune.cents / 2)
+      p.set('osc3type', waves[0])
+      p.set('osc3cent', Math.round(half))
+      p.set('osc1cent', -Math.round(half))
+      p.set('mixerosc3vol', clamp(Math.round(1024 * Math.sqrt(detuneLevel(detune.depth)))))
+      added.detune = 2 * Math.round(half)
+    }
+    // A pitch that wanders: not where a second voice, a chorus or inharmonic partials make it look
+    // so, nor past a few cents (a chorus's wobble, not an oscillator's drift).
+    if (drift >= DIRT.driftCents && drift <= DIRT.driftMaxCents && !added.detune && !ensemble && !a.warnings.includes('inharmonic or noisy')) {
+      p.set('lfo3wave', 9) // Random
+      p.set('lfo3bpmsync', 0)
+      p.set('lfo3ratesyncoff', rawFor('lfo3ratesyncoff', 1.5))
+      p.set('lfo3smooth', 127)
+      p.set('lfo3level', 1024)
+      route(p, 6, 8 /* LFO 3 */, 'allosc', Math.min(16, drift / CALIBRATION.driftCentsPerDepth))
+      added.drift = Math.round(drift)
+    }
+  }
+
   // Playing: velocity on the Amp envelope and the filter, aftertouch on the filter.
   p.set('ampvelenv', 512 + PLAYING.ampVelocity * 8)
   if (filterEnvelope) p.set('filter1velenv', 512 + PLAYING.filterVelocity * 8)
@@ -465,6 +533,7 @@ export function buildWavPatch(
   else knob('filter1resonance', 'Resonance', 640, 'bottom')
   knob('env2attacksyncoff', 'Attack', 384)
   knob('env2releasesyncoff', 'Release', 384)
+  knob('filter1drive', 'Dirt', 512, 'bottom')
   // Movement: none at the knob's bottom, as generated in its middle, twice as much at the top.
   const moving = filterEnvelope ? 'filter1env1amount' : fm?.envelope || waves.length > 1 ? 'modmatrix1depth' : null
   if (moving) knob(moving, 'Movement', 2 * Math.min(512, p.get(moving) - 512))
@@ -474,6 +543,7 @@ export function buildWavPatch(
     note: noteName(a.midi) + (Math.abs(a.cents) >= 5 ? ` ${a.cents > 0 ? '+' : '−'}${Math.abs(a.cents)} cents` : ''),
     waves,
     sub,
+    dirt: added,
     fm,
     filterEnvelope,
     vibrato,
@@ -514,10 +584,13 @@ function setMacro(p: Patch, n: number, name: string, key: string, span: number, 
   return name
 }
 
-/** Mod matrix route `n`: `source` to the destination of `key`, at `depth` of -128..128. */
+/** The destination All Osc Pitch: no one param, so not in DESTINATION_KEYS. */
+const ALL_OSC_PITCH = 19
+
+/** Mod matrix route `n`: `source` to the destination of `key` ('allosc': All Osc Pitch), at `depth` of -128..128. */
 function route(p: Patch, n: number, source: number, key: string, depth: number) {
   p.set(`modmatrix${n}modsource`, source)
-  p.set(`modmatrix${n}modtarget`, destinationOf(key)!)
+  p.set(`modmatrix${n}modtarget`, key === 'allosc' ? ALL_OSC_PITCH : destinationOf(key)!)
   p.set(`modmatrix${n}depth`, Math.round(512 + 4 * clamp(depth, -128, 128)))
 }
 
@@ -526,7 +599,7 @@ function route(p: Patch, n: number, source: number, key: string, depth: number) 
  * filter envelope, vibrato on the Mod Wheel", or with FM "Play C4: Mutant FM 3:1, its depth
  * moving, ..."; a recording that isn't one clear note says so: "(noisy: a rough start)".
  */
-export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
+export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
   const name = (wave: number) => WAVE_FEATURES[wave]?.name ?? `Wave ${wave}`
   // The waves in the order they play, each once in a row; past three, the first and the last.
   const order = w.waves.filter((v, i) => v !== w.waves[i - 1]).map(name)
@@ -535,6 +608,9 @@ export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'fm' | 'f
     ? [`Mutant FM ${w.fm.ratio}:1${w.fm.envelope ? ', its depth moving' : ''}`]
     : [`${scan.join(' → ')}${w.waves.length > 1 ? ' by WaveScan' : ''}${w.sub ? ' over a Sine' : ''}`]
   if (w.filterEnvelope) parts.push('filter envelope')
+  if (w.dirt.detune) parts.push(`OSC 3 ${w.dirt.detune} cents apart`)
+  if (w.dirt.drift) parts.push('drifting')
+  if (w.dirt.noise) parts.push(`${w.dirt.noise.toLowerCase()} noise`)
   parts.push(w.vibrato ? `vibrato ${w.vibrato.rateHz.toFixed(1)} Hz` : 'vibrato on the Mod Wheel')
   if (w.tremolo) parts.push(`tremolo ${w.tremolo.rateHz.toFixed(1)} Hz`)
   const warn = w.warnings.length ? ` (${w.warnings.join(', ')}: a rough start)` : ''

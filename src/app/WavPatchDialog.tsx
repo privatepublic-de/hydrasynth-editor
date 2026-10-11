@@ -13,6 +13,7 @@ const readChoices = (v: Record<string, unknown>) => ({
   envelope: isIndex(v.envelope, ENVELOPES.length) ? v.envelope : 0,
   overTime: v.overTime !== false,
   wobble: v.wobble !== false,
+  dirt: v.dirt !== false,
 })
 
 type Loaded = { analysis: SoundAnalysis; levels: (number[] | null)[]; peaks: (number | null)[] } | { error: string } | null
@@ -58,10 +59,11 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
             envelope: ENVELOPES[choices.envelope].value,
             overTime: choices.overTime,
             wobble: choices.wobble,
+            dirt: choices.dirt,
             name: title,
           })
         : null,
-    [loaded, choices.source, choices.envelope, choices.overTime, choices.wobble, title],
+    [loaded, choices.source, choices.envelope, choices.overTime, choices.wobble, choices.dirt, title],
   )
   const status = result ? wavStatus(result) : loaded && 'error' in loaded ? loaded.error : 'Listening…'
 
@@ -112,6 +114,13 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
       <label className="speech-dialog__field" title="Vibrato (LFO 1) and tremolo (LFO 2) as in the recording; without vibrato in it, the Mod Wheel adds some.">
         <input type="checkbox" checked={choices.wobble} onChange={(e) => choose({ wobble: e.target.checked })} />
         Vibrato and tremolo as recorded
+      </label>
+      <label
+        className="speech-dialog__field"
+        title="Noise between the harmonics (the noise source), a second voice some cents off (OSC 3) and a pitch that wanders (a Random LFO 3), where the recording has more of them than a clean synth. Distortion is on the Dirt macro."
+      >
+        <input type="checkbox" checked={choices.dirt} onChange={(e) => choose({ dirt: e.target.checked })} />
+        Drift, detune and noise as recorded
       </label>
       <p className="speech-dialog__said wav-dialog__said">{status}</p>
       {result && (
