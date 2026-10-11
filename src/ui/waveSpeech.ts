@@ -17,6 +17,10 @@ let levels: Promise<(number[] | null)[]> | null = null
 /** Each wave's harmonicLevels, measured once from the recorded cycles (public/wave-cycles.json). */
 export const waveLevels = () => (levels ??= loadWaveCycles().then((cycles) => cycles.map((c) => (c ? harmonicLevels(c.cycle) : null))))
 
+let peaks: Promise<(number | null)[]> | null = null
+/** Each wave's loudest harmonic as the synth plays it (amplitude, full scale 1): how loud it is next to another. */
+export const wavePeaks = () => (peaks ??= loadWaveCycles().then((cycles) => cycles.map((c) => (c ? c.level * Math.max(...harmonicAmps(c.cycle)) : null))))
+
 /** Harmonics measured per wave: up to ~8 kHz even for a note as low as C2. */
 export const HARMONICS = 128
 /** In a speech fill, a position (2-8) left silent: the gap of a stop consonant or between words. */
@@ -24,6 +28,13 @@ export const SILENCE = -1
 
 /** Each harmonic's level in dB (loudest 0, floor -100), from one recorded cycle. */
 export function harmonicLevels(cycle: Float32Array): number[] {
+  const mags = harmonicAmps(cycle)
+  const peak = Math.max(...mags) || 1
+  return mags.map((m) => 20 * Math.log10(m / peak + 1e-5))
+}
+
+/** Each harmonic's amplitude in one cycle (a sine of peak 1: 1). */
+export function harmonicAmps(cycle: Float32Array): number[] {
   const n = cycle.length
   const cos = Float64Array.from({ length: n }, (_, i) => Math.cos((2 * Math.PI * i) / n))
   const sin = Float64Array.from({ length: n }, (_, i) => Math.sin((2 * Math.PI * i) / n))
@@ -36,10 +47,9 @@ export function harmonicLevels(cycle: Float32Array): number[] {
       re += cycle[i] * cos[j]
       im -= cycle[i] * sin[j]
     }
-    mags.push(Math.hypot(re, im))
+    mags.push((2 * Math.hypot(re, im)) / n)
   }
-  const peak = Math.max(...mags) || 1
-  return mags.map((m) => 20 * Math.log10(m / peak + 1e-5))
+  return mags
 }
 
 type Kind = 'vowel' | 'glide' | 'nasal' | 'hiss' | 'stop'

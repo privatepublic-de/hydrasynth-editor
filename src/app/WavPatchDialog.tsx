@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { analyse, type SoundAnalysis } from '../audio/analyse'
 import { parseWav } from '../audio/wav'
 import { WAVE_FEATURES } from '../ui/waveFeatures.generated'
-import { waveLevels } from '../ui/waveSpeech'
+import { waveLevels, wavePeaks } from '../ui/waveSpeech'
 import { buildWavPatch, ENVELOPES, SOURCES, wavStatus } from '../ui/wavPatch'
 import { isIndex, useSessionChoices } from './sessionChoices'
 import { useEditor } from './store'
@@ -15,7 +15,7 @@ const readChoices = (v: Record<string, unknown>) => ({
   wobble: v.wobble !== false,
 })
 
-type Loaded = { analysis: SoundAnalysis; levels: (number[] | null)[] } | { error: string } | null
+type Loaded = { analysis: SoundAnalysis; levels: (number[] | null)[]; peaks: (number | null)[] } | { error: string } | null
 
 /**
  * Asks before the whole patch is replaced by one that plays the note recorded in `file`
@@ -34,10 +34,10 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
     let live = true
     void (async () => {
       try {
-        const [bytes, levels] = await Promise.all([file.arrayBuffer(), waveLevels()])
+        const [bytes, levels, peaks] = await Promise.all([file.arrayBuffer(), waveLevels(), wavePeaks()])
         if (levels.filter(Boolean).length < WAVE_FEATURES.length) throw new Error('The wave data didn’t load')
         const analysis = analyse(parseWav(bytes))
-        if (live) setLoaded({ analysis, levels })
+        if (live) setLoaded({ analysis, levels, peaks })
       } catch (e) {
         if (live) setLoaded({ error: e instanceof Error ? e.message : String(e) })
       }
@@ -53,6 +53,7 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
       loaded && 'analysis' in loaded
         ? buildWavPatch(loaded.analysis, {
             levels: loaded.levels,
+            peaks: loaded.peaks,
             source: SOURCES[choices.source].value,
             envelope: ENVELOPES[choices.envelope].value,
             overTime: choices.overTime,

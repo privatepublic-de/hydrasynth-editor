@@ -7,7 +7,7 @@ import { param, type Patch } from '../src/params/patch'
 import { labelNumber, rawFor } from '../src/ui/timeTables'
 import { decodeCycle } from '../src/ui/waveCycles'
 import { WAVE_FEATURES } from '../src/ui/waveFeatures.generated'
-import { harmonicLevels } from '../src/ui/waveSpeech'
+import { harmonicAmps, harmonicLevels } from '../src/ui/waveSpeech'
 import { FM_CALIBRATION } from '../src/ui/fmModel'
 import { destinationOf } from '../src/ui/modDestinations'
 import { buildWavPatch, CALIBRATION, distance, fitFm, fitWave, wavStatus } from '../src/ui/wavPatch'
@@ -16,6 +16,7 @@ import { RATE, sawAmps, tone } from './signals'
 const data = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8'))
 const cycles: (Float32Array | null)[] = data.waves.map((w: { cycle: string } | null) => w && decodeCycle(w.cycle))
 const levels = cycles.map((c) => (c ? harmonicLevels(c) : null))
+const peaks: (number | null)[] = data.waves.map((w: { level: number } | null, i: number) => w && w.level * Math.max(...harmonicAmps(cycles[i]!)))
 const index = (n: string) => WAVE_FEATURES.findIndex((w) => w.name === n)
 /** `key` as the patch plays it: plus what any macro on it adds at its knob (depth d: d * 8 raw over the knob). */
 function played(p: Patch, key: string): number {
@@ -124,7 +125,7 @@ describe('buildWavPatch', () => {
     expect(show(w.patch, 'modmatrix1modtarget')).toBe('Osc 1 WaveScan')
     // Depth 128 reaches position 8: n waves need (n - 1)/7 of it.
     expect(parseFloat(show(w.patch, 'modmatrix1depth'))).toBeCloseTo((128 * (w.waves.length - 1)) / 7, 0)
-    expect(wavStatus(w)).toContain(`${WAVE_FEATURES[w.waves[0]].name} → ${WAVE_FEATURES[w.waves.at(-1)!].name} by WaveScan`)
+    expect(wavStatus(w)).toMatch(new RegExp(`: ${WAVE_FEATURES[w.waves[0]].name} → .*${WAVE_FEATURES[w.waves.at(-1)!].name} by WaveScan`))
     expect(buildWavPatch(a, { levels, overTime: false }).waves).toHaveLength(1)
 
     const n = 20
@@ -187,6 +188,22 @@ describe('buildWavPatch', () => {
     expect(show(w.patch, 'modmatrix3modtarget')).toBe('Filt 1 Cutoff')
     expect(show(w.patch, 'modmatrix4modsource')).toBe('Chan Aftertouch')
     expect(show(w.patch, 'modmatrix5modsource')).toMatch(/^Poly A/)
+  })
+
+  it('plays a Sine on OSC 2 under a wave whose fundamental falls short', () => {
+    // The Mini's Basic Triangle (Samples From Mars): an octave-up triangle over a sub 9 dB under it,
+    // and only SquRoo 11 (its fundamental 25 dB under its octave) to play it with.
+    const amps = [-9, 0, -31, -47, -39, -22, -45, -57, -49, -31, -53, -62, -55, -37].map((db) => 0.5 * 10 ** (db / 20))
+    const a = analyse({ samples: tone(110, amps, 0.8), sampleRate: RATE })
+    const only = levels.map((l, i) => (i === index('SquRoo 11') ? l : null))
+    const w = buildWavPatch(a, { levels: only, peaks, overTime: false })
+    expect(w.sub).toBe(true)
+    expect(show(w.patch, 'osc2type')).toBe('Sine')
+    expect(w.patch.get('mixerosc2vol')).toBeGreaterThan(256)
+    expect(wavStatus(w)).toContain('SquRoo 11 over a Sine')
+    // With its fundamental there, none; nor without the waves' loudness.
+    expect(buildWavPatch(saw, { levels, peaks }).sub).toBe(false)
+    expect(buildWavPatch(a, { levels: only, overTime: false }).sub).toBe(false)
   })
 
   it('names what may be off in the status', () => {

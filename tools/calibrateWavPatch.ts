@@ -16,6 +16,7 @@
 //              30, 64, 100 and 127: level (dB) and cutoff, against velocity 127
 //   macro      a macro (depth 32) at knobs 0..128 on Filt 1 Cutoff, and on Matrix 1 Depth with ENV 3
 //              (held full) routed to Filt 1 Cutoff at depth 0: where the cutoff goes, in raw
+//   mixer      a Sine on OSC 2 alone at Osc 2 Vol 128..16: its level (dB) against 128
 //   tremolo    a Sine LFO 2 at 4 Hz through Amp LFO 2 Amount +16: dB to either side
 // Usage: npx vite-node tools/calibrateWavPatch.ts <experiment>
 import { analyse } from '../src/audio/analyse'
@@ -244,6 +245,22 @@ async function main() {
           rows.push(`knob ${knob / 8}: +${raw(fit.ratio * f0) - 256}`)
         }
         console.log(`macro depth 32 on ${target} (cutoff raw over 256): ${rows.join(', ')}`)
+      }
+    } else if (experiment === 'mixer') {
+      const level = (x: Float64Array) => {
+        let s = 0
+        for (let i = Math.round(0.3 * RATE); i < Math.round(0.9 * RATE); i++) s += x[i] * x[i]
+        return 10 * Math.log10(s / (0.6 * RATE))
+      }
+      let full = 0
+      for (const vol of [1024, 768, 512, 256, 128]) {
+        const p = sawPatch()
+        p.set('mixerosc1vol', 0)
+        p.set('osc2type', 0) // Sine
+        p.set('mixerosc2vol', vol)
+        const db = level(await synth.take(p, 48, 1))
+        if (vol === 1024) full = db
+        console.log(`Osc 2 Vol ${show('mixerosc2vol', vol)}: ${(db - full).toFixed(1)} dB (linear ${(20 * Math.log10(vol / 1024)).toFixed(1)})`)
       }
     } else if (experiment === 'tremolo') {
       for (const amount of [576, 640, 768, 1024]) {

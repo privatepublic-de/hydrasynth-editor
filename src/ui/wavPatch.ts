@@ -2,11 +2,13 @@
 // the synth's waves or from Mutant FM (or whichever fits better):
 //   OSC 1      the wave whose harmonics best match the note's at its peak; following how the
 //              sound changes (`overTime`), a WaveScan list of the waves along the note when they
-//              differ, swept by ENV 3 (mod matrix route 1 to Osc 1 WaveScan)
+//              differ enough to play it closer, swept by ENV 3 (mod matrix route 1 to Osc 1 WaveScan)
+//   OSC 2      a Sine at the note when the wave's fundamental falls more than 6 dB short of the
+//              note's (a sub oscillator, as on a Minimoog), at the level that makes it up
 //   Mutant 1   FM: a Sine on OSC 1, FM-Linear at the Ratio and Depth whose harmonics best match
 //              the peak (src/ui/fmModel.ts); following how the sound changes, ENV 3 moves the
 //              Depth with the note's (mod matrix route 1 to Mut 1 Depth), and no WaveScan
-//   Filter 1   LP Ladder 12, keytrack 100 %: the cutoff that, with the wave, best matches the
+//   Filter 1   LP Ladder 12, keytrack 100 % (open with FM): the cutoff that, with the wave, best matches the
 //              peak; following how the sound changes, ENV 1 (its own Env 1 Amount) follows the
 //              note's brightness when that moves more than half an octave (not with FM: the
 //              cutoff stays at the peak's, and ENV 3 moves the Depth instead)
@@ -85,6 +87,8 @@ const FM_MARGIN = 0.5
 export interface WavPatchOptions {
   /** Each wave's harmonicLevels (src/ui/waveSpeech.ts waveLevels). */
   levels: (number[] | null)[]
+  /** Each wave's loudest harmonic as played (src/ui/waveSpeech.ts wavePeaks): without them, no OSC 2 Sine. */
+  peaks?: (number | null)[]
   source?: Source
   envelope?: Envelope
   /** WaveScan and a filter envelope following how the note changes. */
@@ -100,6 +104,8 @@ export interface WavPatch {
   note: string
   /** The waves played, in WaveScan order (one: no WaveScan; none with FM). */
   waves: number[]
+  /** OSC 2 plays a Sine under the wave. */
+  sub: boolean
   /** Mutant FM instead: its Ratio, Depth (raw) and whether ENV 3 moves the Depth. */
   fm: { ratio: number; depth: number; envelope: boolean } | null
   filterEnvelope: boolean
@@ -262,7 +268,7 @@ export function fitFm(target: number[], ratio?: number, cutoff?: number): { rati
  * the onset, at most 3 s), cut into equal parts, each part's best wave; null when it's one wave.
  * `cutoffs`: the cutoff (x pitch) at each sounding frame.
  */
-function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: number[]) {
+function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: number[], main: number) {
   const frames = sounding(a)
   const best = frames.map((f, i) => fitWave(f.harmonics.levels, levels, cutoffs[i]).wave)
   // The last frame whose best wave differs from the one before.
@@ -287,8 +293,20 @@ function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: numbe
     }
     return pick.wave
   })
-  return waves.every((w) => w === waves[0]) ? null : { waves, spanS }
+  if (waves.every((w) => w === waves[0])) return null
+  // Worth it only if it plays the note closer than the one wave does: on a steady note, near-equal
+  // waves trade places frame by frame, and a sweep through them sounds like nothing but a wobble.
+  const at = (f: number) => waves[Math.min(n - 1, Math.round((frames[f].t - a.onsetS) / step))]
+  const gain = frames.reduce((sum, f, i) => sum + distance(f.harmonics.levels, levels[main]!, cutoffs[i]) - distance(f.harmonics.levels, levels[at(i)]!, cutoffs[i]), 0)
+  return gain / frames.length >= SCAN_GAIN ? { waves, spanS } : null
 }
+
+/** The Sine (wave 0), and how far (dB) a wave's fundamental may fall short before OSC 2 plays one under it. */
+const SINE = 0
+const SUB_GAP = 6
+
+/** How much closer (dB, on average over the frames) WaveScan has to play the note than one wave. */
+const SCAN_GAIN = 1.5
 
 /** ENV n's times and sustain for `adsr`: on the Amp (`amp`) or the filter, as measured on each. */
 function setEnvelope(p: Patch, n: number, adsr: Adsr, amp: boolean) {
@@ -306,12 +324,14 @@ function setEnvelope(p: Patch, n: number, adsr: Adsr, amp: boolean) {
 /** The Init patch turned into one that plays the note in `a`. */
 export function buildWavPatch(
   a: SoundAnalysis,
-  { levels, source = 'waves', envelope = 'detect', overTime = true, wobble = true, name = '' }: WavPatchOptions,
+  { levels, peaks, source = 'waves', envelope = 'detect', overTime = true, wobble = true, name = '' }: WavPatchOptions,
 ): WavPatch {
   const p = new Patch(initPatchBytes())
   p.name = name.slice(0, 16)
   const byWave = source === 'fm' ? null : fitWave(a.spectrum.levels, levels)
-  const byFm = source === 'waves' ? null : fitFm(a.spectrum.levels)
+  // FM through an open filter: its Depth carries the brightness, as on a DX; a cutoff fitted at the
+  // peak trimmed the bright start of a falling Depth, and the level then swelled in as it fell.
+  const byFm = source === 'waves' ? null : fitFm(a.spectrum.levels, undefined, Infinity)
   const useFm = !!byFm && (!byWave || byFm.fit < byWave.fit - FM_MARGIN)
   const { cutoff, fit } = useFm ? byFm! : byWave!
 
@@ -349,8 +369,25 @@ export function buildWavPatch(
     waves = [byWave!.wave]
   }
 
+  // OSC 2: a Sine under a wave whose fundamental falls short of the note's, at the level that
+  // makes up the difference (the levels set the wave's loudest harmonic against the note's).
+  let sub = false
+  const wave = waves[0]
+  if (!useFm && peaks?.[wave] && peaks[SINE]) {
+    const want = 10 ** (a.spectrum.levels[0] / 20)
+    const has = 10 ** ((levels[wave]![0] + lpDb(1 / cutoff)) / 20)
+    if (20 * Math.log10(want / has) > SUB_GAP) {
+      const need = (peaks[wave]! * Math.sqrt(want * want - has * has)) / peaks[SINE]!
+      sub = true
+      p.set('osc2type', SINE)
+      p.set('osc2semi', 0)
+      p.set('osc2cent', 0)
+      // Osc 2 Vol sets the amplitude as its square (mixer: 96 of 128 -5.0 dB, 64 -12.0).
+      p.set('mixerosc2vol', clamp(Math.round(1024 * Math.sqrt(Math.min(1, need)))))
+    }
+  }
+
   if (overTime && !useFm) {
-    const wave = waves[0]
     const bright = brightness(a, levels[wave]!)
     if (bright) {
       // ENV 1 from the lower end's cutoff up by the span; Env 1 Amount scales a full envelope.
@@ -361,7 +398,7 @@ export function buildWavPatch(
       setEnvelope(p, 1, { attackS: bright.attackS, decayS: bright.decayS, sustain: bright.sustain, releaseS: 0.1 }, false)
     }
     const cutoffs = bright ? bright.track.map((o) => 2 ** o) : sounding(a).map(() => cutoff)
-    const scan = scanWaves(a, levels, cutoffs)
+    const scan = scanWaves(a, levels, cutoffs, wave)
     if (scan) {
       // OSC 1 scans the waves (positions 2-8 store Off and Silence ahead of them; unused ones Off),
       // ENV 3 rising through them over the span: position i of 8 at i/7 of the range.
@@ -436,6 +473,7 @@ export function buildWavPatch(
     patch: p,
     note: noteName(a.midi) + (Math.abs(a.cents) >= 5 ? ` ${a.cents > 0 ? '+' : '−'}${Math.abs(a.cents)} cents` : ''),
     waves,
+    sub,
     fm,
     filterEnvelope,
     vibrato,
@@ -488,11 +526,14 @@ function route(p: Patch, n: number, source: number, key: string, depth: number) 
  * filter envelope, vibrato on the Mod Wheel", or with FM "Play C4: Mutant FM 3:1, its depth
  * moving, ..."; a recording that isn't one clear note says so: "(noisy: a rough start)".
  */
-export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
+export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
   const name = (wave: number) => WAVE_FEATURES[wave]?.name ?? `Wave ${wave}`
+  // The waves in the order they play, each once in a row; past three, the first and the last.
+  const order = w.waves.filter((v, i) => v !== w.waves[i - 1]).map(name)
+  const scan = order.length > 3 ? [order[0], '…', order[order.length - 1]] : order
   const parts = w.fm
     ? [`Mutant FM ${w.fm.ratio}:1${w.fm.envelope ? ', its depth moving' : ''}`]
-    : [w.waves.length > 1 ? `${name(w.waves[0])} → ${name(w.waves[w.waves.length - 1])} by WaveScan` : name(w.waves[0])]
+    : [`${scan.join(' → ')}${w.waves.length > 1 ? ' by WaveScan' : ''}${w.sub ? ' over a Sine' : ''}`]
   if (w.filterEnvelope) parts.push('filter envelope')
   parts.push(w.vibrato ? `vibrato ${w.vibrato.rateHz.toFixed(1)} Hz` : 'vibrato on the Mod Wheel')
   if (w.tremolo) parts.push(`tremolo ${w.tremolo.rateHz.toFixed(1)} Hz`)
