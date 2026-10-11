@@ -122,7 +122,12 @@ function MoreMenu({ withSynth }: { withSynth: boolean }) {
     if (!open) return
     ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
     const away = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false)
-    const escape = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    // Escape hands focus back to the menu button (a click away leaves it where it went).
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      ref.current?.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')?.focus()
+    }
     window.addEventListener('pointerdown', away)
     window.addEventListener('keydown', escape)
     return () => {
