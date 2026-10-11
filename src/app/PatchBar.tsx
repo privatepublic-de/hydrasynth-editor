@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { webMidiUnavailable } from '../midi/transport'
 import { BANK_LETTERS } from '../sysex/protocol'
 import { slotName, type Slot } from '../sync/patchSync'
 import { AboutDialog } from './AboutDialog'
@@ -303,6 +304,7 @@ export function PatchBar() {
     ask({ kind: 'slot', slot: next })
   }, [sync?.busy])
   const patch = sync?.patch
+  const [noWebMidi] = useState(webMidiUnavailable)
 
   if (connection.status === 'demo') {
     return (
@@ -319,10 +321,21 @@ export function PatchBar() {
     return (
       <header className="patch-bar patch-bar--offline">
         <span className="brand">Hydrasynth Editor</span>
-        <button type="button" className="function-button function-button--primary" onClick={() => void connect()} disabled={connection.status === 'connecting'}>
+        <button
+          type="button"
+          className="function-button function-button--primary"
+          onClick={() => void connect()}
+          disabled={connection.status === 'connecting' || !!noWebMidi}
+        >
           {connection.status === 'connecting' ? 'Connecting…' : 'Connect to the Hydrasynth'}
         </button>
-        {connection.status === 'failed' && <span className="status status--error">{connection.message}</span>}
+        {noWebMidi ? (
+          <span className="status status--error" role="alert">
+            {noWebMidi} <a href="?demo">Try the demo</a>
+          </span>
+        ) : (
+          connection.status === 'failed' && <span className="status status--error">{connection.message}</span>
+        )}
         <MoreMenu withSynth={false} />
       </header>
     )

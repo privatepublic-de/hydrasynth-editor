@@ -9,6 +9,14 @@ export interface MidiPortPair {
   output: MIDIOutput
 }
 
+/** Why this page can't use Web MIDI at all, or null when it can (permission is asked later, on Connect). */
+export function webMidiUnavailable(): string | null {
+  if ('requestMIDIAccess' in navigator) return null
+  // Browsers only offer Web MIDI on secure pages: a file opened from disk or a plain-http host has none.
+  if (!window.isSecureContext) return 'Web MIDI needs the served page: open the editor with the start script, not from disk.'
+  return "This browser doesn't support Web MIDI. Use Firefox, Chrome or Edge."
+}
+
 export async function requestWebMidi(): Promise<MIDIAccess> {
   if (!navigator.requestMIDIAccess) throw new Error('This browser has no Web MIDI')
   return navigator.requestMIDIAccess({ sysex: true })
