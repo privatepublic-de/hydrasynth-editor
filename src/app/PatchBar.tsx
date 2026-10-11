@@ -332,7 +332,7 @@ export function PatchBar() {
           onClick={() => void connect()}
           disabled={connection.status === 'connecting' || !!noWebMidi}
         >
-          {connection.status === 'connecting' ? 'Connecting…' : 'Connect to the Hydrasynth'}
+          {connection.status === 'connecting' ? 'Connecting…' : 'Connect'}
         </button>
         {noWebMidi ? (
           <span className="status status--error" role="alert">

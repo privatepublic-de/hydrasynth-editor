@@ -15,7 +15,7 @@ Double-click the launcher for your system in `start/`:
 
 It installs what's needed the first time, builds the editor and opens
 http://localhost:5179 in the default browser (Chrome, Edge or Firefox; Safari has no
-Web MIDI); click Connect to the Hydrasynth.
+Web MIDI); click Connect.
 Close the terminal window to stop it. The same thing from a terminal: `npm start`.
 
 The port is fixed because the browser remembers the MIDI permission per address.

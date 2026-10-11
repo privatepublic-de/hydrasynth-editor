@@ -234,7 +234,7 @@ export function ModuleEditor() {
         ) : (
           // First visit: what the synth needs before Connect works, and a way in without one.
           <div className="module-editor__start">
-            <p>Connect the Hydrasynth by USB and switch it on, then click Connect to the Hydrasynth.</p>
+            <p>Connect the Hydrasynth by USB and switch it on, then click Connect.</p>
             <p>
               On the synth, set Param TX/RX to NRPN and Program Change RX to on. Once connected, set the channel
               beside the pads to the synth&rsquo;s MIDI channel.

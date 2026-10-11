@@ -22,7 +22,7 @@ export function PatchHeading() {
     ? ['Demo', 'A built-in patch; nothing is sent to a synth']
     : origin
       ? [slotName(origin), `Stored in ${slotName(origin)}; the synth plays it from there`]
-      : ['New', 'Not stored in a slot: the synth plays it from H128 (scratch slot)']
+      : ['Not stored', 'Not stored in a slot: the synth plays it from H128 (scratch slot)']
   return (
     <div className="patch-heading">
       <span className="patch-heading__slot" title={where}>
