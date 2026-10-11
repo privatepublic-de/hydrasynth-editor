@@ -125,7 +125,7 @@ describe('buildSpeechPatch', () => {
   it('has Speed (LFO rates), Fundamental (OSC 3 with the voicing), Voice (Formant Control) and Whisper (breath for voice) macros', () => {
     const s = buildSpeechPatch('hello world')!
     expect(s.patch.macroName(1)).toBe('Speed')
-    expect(show(s, 'macro1panelvalue')).toBe('64,0')
+    expect(show(s, 'macro1panelvalue')).toBe('64.0')
     expect([1, 2, 3, 4, 5].map((i) => show(s, `macro1target${i}`))).toEqual(['LFO 1 Rate', 'LFO 2 Rate', 'LFO 3 Rate', 'LFO 4 Rate', 'LFO 5 Rate'])
     expect(new Set([1, 2, 3, 4, 5].map((i) => s.patch.get(`macro1depth${i}`))).size).toBe(1)
     expect(s.patch.macroName(2)).toBe('Fundamental')
@@ -142,7 +142,7 @@ describe('buildSpeechPatch', () => {
     expect(show(s, 'macro3target1')).toBe('Filt 1 Control')
     // Formant Control 64 (raw 512) with the Voice knob in its middle: base + 64/128 * 32/128 * 1024.
     expect(s.patch.get('filter1special') + 128).toBe(512)
-    expect(show(s, 'mixerosc3vol')).toBe('0,0')
+    expect(show(s, 'mixerosc3vol')).toBe('0.0')
   })
 
   describe('with waves', () => {

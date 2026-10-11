@@ -15,7 +15,8 @@ if [ ! -f local/edisyn-build/.built-$COMMIT ]; then
 fi
 javac -nowarn -d local/extract-build -cp local/edisyn-build tools/edisyn-extract/edisyn/synth/asmhydrasynth/Extract.java 2>&1 | grep -v '^Note:' || true
 # Edisyn's panels need a real AWT (headless throws); UIElement keeps it out of the Dock.
-java -Dapple.awt.UIElement=true -cp "local/edisyn-build:local/extract-build:$SRC" \
+# An English locale, or String.format writes decimal commas into the display strings.
+java -Dapple.awt.UIElement=true -Duser.language=en -Duser.country=US -cp "local/edisyn-build:local/extract-build:$SRC" \
   edisyn.synth.asmhydrasynth.Extract local/extract local/patches/*.bin > local/extract/edisyn.log 2>&1
 echo "$COMMIT" > local/extract/EDISYN_COMMIT
 echo "extracted to local/extract"

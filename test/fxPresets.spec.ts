@@ -71,7 +71,7 @@ describe('FX presets', () => {
     await settle(sync.load(new Patch(initPatchBytes()), { dirty: false }))
     sync.set('postfxtype', 8)
     const p = sync.get().patch!
-    expect([1, 2, 3, 4, 5].map((j) => formatValue(param(`postfx8param${j}`), p.get(`postfx8param${j}`)))).toEqual(['20,0:1', '-32,0', '1', '285', '128'])
+    expect([1, 2, 3, 4, 5].map((j) => formatValue(param(`postfx8param${j}`), p.get(`postfx8param${j}`)))).toEqual(['20.0:1', '-32.0', '1', '285', '128'])
     expect(p.get('postfxsidechain')).toBe(0)
   })
 

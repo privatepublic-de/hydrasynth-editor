@@ -7,9 +7,9 @@ import { param, type Patch } from '../params/patch'
 /** BPM-synced times are drawn as if at this tempo. */
 export const DRAW_BPM = 120
 
-/** A displayed time in seconds: "0ms", "448ms", "2,17s", or a synced "1/16 D", "1/2 T", "64" (whole notes). */
+/** A displayed time in seconds: "0ms", "448ms", "2.17s", or a synced "1/16 D", "1/2 T", "64" (whole notes). */
 export function displayedSeconds(text: string): number {
-  const t = text.trim().replace(',', '.')
+  const t = text.trim()
   let m: RegExpMatchArray | null
   if ((m = t.match(/^([\d.]+)\s*ms$/))) return Number(m[1]) / 1000
   if ((m = t.match(/^([\d.]+)\s*s$/))) return Number(m[1])

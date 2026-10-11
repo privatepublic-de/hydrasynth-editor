@@ -566,7 +566,7 @@ const RATES: [number, number][] = (() => {
   const def = param('lfo1ratesyncoff')
   const out: [number, number][] = []
   for (let v = def.min; v <= def.max; v++) {
-    const hz = parseFloat(formatValue(def, v).replace(',', '.'))
+    const hz = parseFloat(formatValue(def, v))
     if (hz > 0) out.push([v, hz])
   }
   return out
@@ -691,7 +691,7 @@ const DECAYS: [number, number][] = (() => {
   const out: [number, number][] = []
   for (let v = def.min; v <= def.max; v++) {
     const label = formatValue(def, v)
-    const n = parseFloat(label.replace(',', '.'))
+    const n = parseFloat(label)
     out.push([v, label.endsWith('ms') ? n : n * 1000])
   }
   return out

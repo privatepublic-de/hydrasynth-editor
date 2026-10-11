@@ -7,7 +7,7 @@ describe('shapes for the display', () => {
   it('reads displayed times in seconds, synced ones at 120 BPM', () => {
     expect(displayedSeconds('0ms')).toBe(0)
     expect(displayedSeconds('448ms')).toBeCloseTo(0.448)
-    expect(displayedSeconds('2,17s')).toBeCloseTo(2.17)
+    expect(displayedSeconds('2.17s')).toBeCloseTo(2.17)
     expect(displayedSeconds('1/4')).toBeCloseTo(0.5)
     expect(displayedSeconds('1/4 D')).toBeCloseTo(0.75)
     expect(displayedSeconds('1/4 T')).toBeCloseTo(1 / 3)
