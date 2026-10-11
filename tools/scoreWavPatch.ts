@@ -3,7 +3,7 @@
 // (weighted dB RMS, as the fit), brightness over time, the level's shape, pitch and wobble. The
 // recordings go to local/wav-patches/<name>-<envelope>.wav, and the WAV then the synth in one file
 // to local/wav-patches/ab/, for listening.
-// Usage: npx vite-node tools/scoreWavPatch.ts <file.wav>... [--envelope detect|pluck|keys|pad] [--steady]
+// Usage: npx vite-node tools/scoreWavPatch.ts <file.wav>... [--source waves|fm|auto] [--envelope detect|pluck|keys|pad] [--steady]
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { basename } from 'node:path'
@@ -11,7 +11,7 @@ import { analyse, type SoundAnalysis } from '../src/audio/analyse'
 import { parseWav } from '../src/audio/wav'
 import { decodeCycle } from '../src/ui/waveCycles'
 import { harmonicLevels } from '../src/ui/waveSpeech'
-import { buildWavPatch, distance, type Envelope, wavStatus } from '../src/ui/wavPatch'
+import { buildWavPatch, distance, type Envelope, type Source, wavStatus } from '../src/ui/wavPatch'
 import { openSynth } from './synthTake'
 import { RATE } from './waveAudio'
 
@@ -35,19 +35,21 @@ const ms = (s: number) => `${Math.round(s * 1000)} ms`
 
 async function main() {
   const args = process.argv.slice(2)
-  const envelope = (args.includes('--envelope') ? args[args.indexOf('--envelope') + 1] : 'detect') as Envelope
-  const files = args.filter((a, i) => a.endsWith('.wav') && args[i - 1] !== '--envelope')
+  const option = (name: string, fallback: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback)
+  const envelope = option('--envelope', 'detect') as Envelope
+  const source = option('--source', 'waves') as Source
+  const files = args.filter((a) => a.endsWith('.wav'))
   mkdirSync(`${OUT}/ab`, { recursive: true })
   const synth = await openSynth(FILE)
   try {
     for (const file of files) {
       const target = analyse(parseWav(readFileSync(file)))
       const name = basename(file, '.wav')
-      const built = buildWavPatch(target, { levels, envelope, overTime: !args.includes('--steady'), name })
+      const built = buildWavPatch(target, { levels, source, envelope, overTime: !args.includes('--steady'), name })
       const hold = Math.min(6, Math.max(1, (target.held ? target.endS : target.endS - target.adsr.releaseS) - target.onsetS))
       // The Mod Wheel down (the synth keeps where it was last sent): it brings in the vibrato.
       const x = await synth.take(built.patch, target.midi, hold, [[0, 'cc1', 0]])
-      const out = `${OUT}/${name}-${envelope}${args.includes('--steady') ? '-steady' : ''}.wav`
+      const out = `${OUT}/${name}-${source}-${envelope}${args.includes('--steady') ? '-steady' : ''}.wav`
       copyFileSync(FILE, out)
       // The WAV, half a second's silence, the synth: at the recording's rate, stereo, 24-bit.
       const ab = `${OUT}/ab/${basename(out)}`

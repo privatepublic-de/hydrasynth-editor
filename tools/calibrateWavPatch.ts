@@ -5,8 +5,9 @@
 //              notes C2, C3, C4: the cutoff (Hz) that fits each, against the Saw unfiltered
 //   envamount  the same at Cutoff 256 with ENV 1 held full (Sustain 128), Env 1 Amount 0..+64:
 //              cutoff raw moved per raw of amount
-//   filterenv  ENV 1 decaying from full (Sustain 0) at Env 1 Amount +32 from Cutoff 256: the
-//              cutoff over time (octaves above where it ends), against the Decay shown
+//   filterenv  ENV 1 decaying from full (Sustain 0) at Env 1 Amount +32 from Cutoff 256, and ENV 3
+//              through a mod matrix route to Filt 1 Cutoff: the cutoff over time (octaves above
+//              where it ends), against the Decay shown
 //   amp        ENV 2's Attack, Decay (to -40 dB, and to a Sustain), Sustain (level) and Release (to -40 dB) at a few
 //              raw values, against what they show
 //   vibrato    the Voice's vibrato (Amount 0.5 and 2, 5 Hz) with the Mod Wheel down and up; a Sine LFO 1
@@ -18,6 +19,7 @@ import { harmonicsAt } from '../src/audio/spectrum'
 import { formatValue } from '../src/params/display'
 import { initPatchBytes } from '../src/params/initPatch'
 import { Patch, param } from '../src/params/patch'
+import { destinationOf } from '../src/ui/modDestinations'
 import { labelNumber } from '../src/ui/timeTables'
 import { lpDb } from '../src/ui/wavPatch'
 import { openSynth } from './synthTake'
@@ -100,21 +102,27 @@ async function main() {
       const f0 = hz(note)
       const count = Math.min(128, Math.floor(16000 / f0))
       const open = harmonicDb(await synth.take(sawPatch(), note, 1), f0, count)
-      for (const raw of [384, 512]) {
+      // ENV 1 on its own Env 1 Amount, then ENV 3 through mod matrix route 1 (depth +48: 384 raw).
+      for (const [env, raw] of [[1, 384], [1, 512], [3, 512]]) {
         const p = sawPatch(256)
-        p.set('env1attacksyncoff', 0)
-        p.set('env1decaysyncoff', raw)
-        p.set('env1sustain', 0)
-        p.set('filter1env1amount', 768)
+        p.set(`env${env}attacksyncoff`, 0)
+        p.set(`env${env}decaysyncoff`, raw)
+        p.set(`env${env}sustain`, 0)
+        if (env === 1) p.set('filter1env1amount', 768)
+        else {
+          p.set('modmatrix1modsource', env)
+          p.set('modmatrix1modtarget', destinationOf('filter1cutoff')!)
+          p.set('modmatrix1depth', 512 + 4 * 48)
+        }
         const x = f32(await synth.take(p, note, 3))
         const track: string[] = []
-        const shown = labelNumber(show('env1decaysyncoff', raw))
+        const shown = labelNumber(show(`env${env}decaysyncoff`, raw))
         for (let t = 0.02; t < 2.6; t += shown / 8000) {
           const h = harmonicsAt(x, RATE, f0, t * RATE, t * RATE + 8 * (RATE / f0), count).amps.map((a) => 20 * Math.log10(a + 1e-9))
           const fit = fitCutoffRatio(h, open)
           track.push(`${(t * 1000).toFixed(0)}ms ${(Math.log2(fit.ratio * f0) - Math.log2(175)).toFixed(2)}`)
         }
-        console.log(`decay ${raw} shows ${shown} ms; octaves over 175 Hz:\n  ${track.join('  ')}`)
+        console.log(`ENV ${env} decay ${raw} shows ${shown} ms; octaves over 175 Hz:\n  ${track.join('  ')}`)
       }
     } else if (experiment === 'amp') {
       const note = 48

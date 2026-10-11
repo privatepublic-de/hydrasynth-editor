@@ -8,7 +8,8 @@ import { labelNumber, rawFor } from '../src/ui/timeTables'
 import { decodeCycle } from '../src/ui/waveCycles'
 import { WAVE_FEATURES } from '../src/ui/waveFeatures.generated'
 import { harmonicLevels } from '../src/ui/waveSpeech'
-import { buildWavPatch, CALIBRATION, distance, fitWave, wavStatus } from '../src/ui/wavPatch'
+import { FM_CALIBRATION } from '../src/ui/fmModel'
+import { buildWavPatch, CALIBRATION, distance, fitFm, fitWave, wavStatus } from '../src/ui/wavPatch'
 import { RATE, sawAmps, tone } from './signals'
 
 const data = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8'))
@@ -154,6 +155,57 @@ describe('buildWavPatch', () => {
   it('names what may be off in the status', () => {
     const w = buildWavPatch(saw, { levels })
     expect(wavStatus({ ...w, warnings: ['noisy', 'clipped'] })).toMatch(/\(noisy, clipped: best effort\)$/)
+  })
+})
+
+/** A Sine at `f0` phase-modulated as Mutant FM does (fmModel), at `ratio` and Depth `depth(t)` (raw). */
+function fmTone(f0: number, ratio: number, depth: (t: number) => number, seconds: number) {
+  return Float32Array.from({ length: Math.round(seconds * RATE) }, (_, i) => {
+    const t = i / RATE
+    const ph = 2 * Math.PI * f0 * t
+    return 0.5 * Math.sin(ph + depth(t) * FM_CALIBRATION.indexPerRaw * Math.sin(ratio * ph + FM_CALIBRATION.modulatorPhase))
+  })
+}
+
+describe('Mutant FM', () => {
+  it('finds the ratio and depth a note was played with', () => {
+    for (const [ratio, depth] of [[1, 256], [2, 384], [3, 192], [5, 128]]) {
+      const a = analyse({ samples: fmTone(220, ratio, () => depth, 0.6), sampleRate: RATE })
+      const fit = fitFm(a.spectrum.levels)
+      expect(fit.ratio, `ratio ${ratio}, depth ${depth}`).toBe(ratio)
+      expect(Math.abs(fit.depth - depth), `ratio ${ratio}, depth ${depth}`).toBeLessThanOrEqual(16)
+    }
+  })
+
+  it('plays it on a Sine through Mutant 1, and Auto takes it only where it fits better', () => {
+    const a = analyse({ samples: fmTone(220, 3, () => 384, 1), sampleRate: RATE })
+    const w = buildWavPatch(a, { levels, source: 'fm' })
+    expect(show(w.patch, 'osc1type')).toBe('Sine')
+    expect(show(w.patch, 'mutant1mode')).toBe('FM-Linear')
+    expect(show(w.patch, 'mutant1sourcefmlin')).toBe('Sine')
+    expect(show(w.patch, 'mutant1ratio')).toBe('3.000')
+    expect(show(w.patch, 'mutant1wet')).toBe('100%')
+    expect(w.fm).toEqual({ ratio: 3, depth: 384, envelope: false })
+    expect(wavStatus(w)).toMatch(/^Play A3: Mutant FM 3:1, depth 48,/)
+    expect(buildWavPatch(a, { levels, source: 'auto' }).fm).not.toBeNull()
+    const saw = analyse({ samples: play(cycles[index('Saw')]!, 220, 0.6), sampleRate: RATE })
+    const auto = buildWavPatch(saw, { levels, source: 'auto' })
+    expect(auto.fm).toBeNull()
+    expect(show(auto.patch, 'osc1type')).toBe('Saw')
+    expect(show(auto.patch, 'mutant1wet')).toBe('0%')
+  })
+
+  it('follows a depth that falls with ENV 3 on Mut 1 Depth', () => {
+    const a = analyse({ samples: fmTone(220, 2, (t) => 128 + 512 * Math.max(0, 1 - t / 0.6), 1.2), sampleRate: RATE })
+    const w = buildWavPatch(a, { levels, source: 'fm' })
+    expect(w.fm!.envelope).toBe(true)
+    expect(Math.abs(w.fm!.depth - 128)).toBeLessThanOrEqual(32)
+    expect(show(w.patch, 'modmatrix1modsource')).toBe('Env 3')
+    expect(show(w.patch, 'modmatrix1modtarget')).toMatch(/Mut.*1.*Depth/)
+    // A route at depth d moves the Depth d * 8 raw: about 512 here.
+    expect(parseFloat(show(w.patch, 'modmatrix1depth'))).toBeGreaterThan(48)
+    expect(labelNumber(show(w.patch, 'env3decaysyncoff'))).toBeGreaterThan(400)
+    expect(wavStatus(w)).toContain('depth envelope')
   })
 })
 

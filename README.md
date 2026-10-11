@@ -37,8 +37,9 @@ The port is fixed because the browser remembers the MIDI permission per address.
 - `src/ui/`: which params each module shows, in the synth's page and knob order
   (`layout.ts`), and which ones its pages hide in some modes (`visibility.ts`).
 - `src/audio/`: reading a WAV and analysing the note in it (pitch, harmonics over time,
-  envelope, vibrato); `src/ui/wavPatch.ts` builds a patch from that, measured on the synth
-  with `tools/calibrateWavPatch.ts` and compared with the WAV by `tools/scoreWavPatch.ts`.
+  envelope, vibrato); `src/ui/wavPatch.ts` builds a patch from that, on the synth's waves or
+  its Mutant FM (`src/ui/fmModel.ts`), measured on the synth with `tools/calibrateWavPatch.ts`
+  and `tools/calibrateMutant.ts`, and compared with the WAV by `tools/scoreWavPatch.ts`.
 - `npm test`: codec, session, schema, speech and audio-analysis tests. With `local/patches`
   (`tools/dumpBanks.ts`) and `local/extract` (`tools/edisyn-extract/run.sh`) present, also
   checks every param of every dumped patch and every NRPN value against Edisyn itself; with

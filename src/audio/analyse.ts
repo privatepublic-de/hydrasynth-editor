@@ -66,7 +66,7 @@ const db = (v: number) => 20 * Math.log10(Math.max(v, 1e-9))
 /** The note in `audio`; throws an Error to show as it is when there's no note to find. */
 export function analyse(audio: Audio): SoundAnalysis {
   const { sampleRate: sr } = audio
-  const x = audio.samples.subarray(0, Math.round(MAX_FILE_S * sr))
+  const x = dcBlocked(audio.samples.subarray(0, Math.round(MAX_FILE_S * sr)), sr)
   const warnings: string[] = []
 
   // Level every 5 ms: RMS over 10 ms to find the note, then over two of its periods (over less,
@@ -76,8 +76,9 @@ export function analyse(audio: Audio): SoundAnalysis {
   const first = levelCurve(x, hop, hop)
   if (first.peak < 1e-4) throw new Error('The file is silent')
   const at = (i: number) => i * hop
+  // Clipping in the file as it is (the DC blocker moves the flat tops).
   let clipped = 0
-  for (let i = 0; i < x.length; i++) if (Math.abs(x[i]) >= 0.999) clipped++
+  for (let i = 0; i < x.length; i++) if (Math.abs(audio.samples[i]) >= 0.999) clipped++
   if (clipped > x.length * 0.001) warnings.push('clipped')
 
   // Pitch: past the attack's transient, over up to half a second of the note.
@@ -93,9 +94,10 @@ export function analyse(audio: Audio): SoundAnalysis {
   const { rel, peak, ip, onset, iEnd, held } = levelCurve(x, hop, Math.max(hop, Math.round(period)))
   if ((iEnd - onset) * HOP_S < 0.1) warnings.push('very short')
 
-  // Harmonics at the peak: eight periods or more, up to half a second.
+  // Harmonics at the peak: over 0.1 s (eight periods of a low note), so a sound that changes
+  // isn't averaged into one it never makes.
   const count = harmonicCount(f0, sr)
-  const length = Math.min(Math.max(8 * period, 0.4 * (at(iEnd) - at(ip))), 0.5 * sr)
+  const length = Math.max(8 * period, Math.min(0.1 * sr, 0.4 * (at(iEnd) - at(ip))))
   let start = at(ip)
   if (start + length > x.length) start = Math.max(0, x.length - length)
   const spectrum = harmonicsAt(x, sr, f0, start, start + length, count)
@@ -152,6 +154,23 @@ export function analyse(audio: Audio): SoundAnalysis {
     tremolo: wobble(levelTrack, WOBBLE_HOP_S, 1),
     warnings,
   }
+}
+
+/**
+ * `x` without its DC (a first-order high-pass at 10 Hz, -0.5 dB at 30 Hz): FM at ratio 1 puts a
+ * sideband at 0 Hz, and a note riding on it never crosses zero for its pitch to be found.
+ */
+function dcBlocked(x: Float32Array, sampleRate: number): Float32Array {
+  const r = 1 - (2 * Math.PI * 10) / sampleRate
+  const out = new Float32Array(x.length)
+  let prevIn = x[0] ?? 0
+  let prevOut = 0
+  for (let i = 0; i < x.length; i++) {
+    prevOut = x[i] - prevIn + r * prevOut
+    prevIn = x[i]
+    out[i] = prevOut
+  }
+  return out
 }
 
 /**

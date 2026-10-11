@@ -1,10 +1,15 @@
-// A patch that plays the note recorded in a WAV file (its analysis: src/audio/analyse.ts):
+// A patch that plays the note recorded in a WAV file (its analysis: src/audio/analyse.ts), from
+// the synth's waves or from Mutant FM (or whichever fits better):
 //   OSC 1      the wave whose harmonics best match the note's at its peak; following how the
 //              sound changes (`overTime`), a WaveScan list of the waves along the note when they
 //              differ, swept by ENV 3 (mod matrix route 1 to Osc 1 WaveScan)
+//   Mutant 1   FM: a Sine on OSC 1, FM-Linear at the Ratio and Depth whose harmonics best match
+//              the peak (src/ui/fmModel.ts); following how the sound changes, ENV 3 moves the
+//              Depth with the note's (mod matrix route 1 to Mut 1 Depth), and no WaveScan
 //   Filter 1   LP Ladder 12, keytrack 100 %: the cutoff that, with the wave, best matches the
 //              peak; following how the sound changes, ENV 1 (its own Env 1 Amount) follows the
-//              note's brightness when that moves more than half an octave
+//              note's brightness when that moves more than half an octave (not with FM: the
+//              cutoff stays at the peak's, and ENV 3 moves the Depth instead)
 //   ENV 2      the Amp: the note's attack, decay, sustain and release, or a Pluck/Keys/Pad preset
 //   LFO 1      vibrato found in the note (route 2 to Osc 1 Pitch), else the Voice's own vibrato,
 //              which plays with the Mod Wheel up
@@ -16,6 +21,7 @@ import type { Adsr, SoundAnalysis, Wobble } from '../audio/analyse'
 import { noteName } from '../audio/pitch'
 import { initPatchBytes } from '../params/initPatch'
 import { Patch } from '../params/patch'
+import { FM_CALIBRATION, FM_DEPTHS, FM_RATIOS, fmLevels } from './fmModel'
 import { destinationOf } from './modDestinations'
 import { rawFor } from './timeTables'
 import { WAVE_FEATURES } from './waveFeatures.generated'
@@ -32,10 +38,13 @@ export const CALIBRATION = {
   /** Env 1 Amount (512 = 0): cutoff raw moved by a full envelope per raw of amount (envamount: +256 moved 256 to 640). */
   envAmountCutoffRaw: 1.5,
   /**
-   * ENV 1 on the cutoff falls linearly in octaves, from full to 0 in the Decay it shows (filterenv:
-   * 896 ms shown, ~900); its Release taken to run the same (not measured on its own).
+   * ENV 1 on the cutoff falls linearly in octaves, from full to 0 in the Decay it shows, and so
+   * does ENV 3 through a mod matrix route (filterenv: 896 ms shown, ~900 either way; speech's
+   * 2x was heard on pitch); Release taken to run the same (not measured on its own).
    */
-  filterDecayFactor: 1,
+  envDecayFactor: 1,
+  /** A mod matrix route at depth d of 128 moves its target by d * 8 raw (filterenv: +48 moved Cutoff 384). */
+  routeRawPerDepth: 8,
   /**
    * The Amp envelope (amp): Attack rises linearly in the time it shows; Decay and Release reach
    * -40 dB in the time they show (x0.85-1.2), and Decay reaches a Sustain in that time too (x0.88
@@ -59,9 +68,19 @@ export const ENVELOPES: { value: Envelope; label: string; adsr?: Adsr }[] = [
   { value: 'pad', label: 'Pad', adsr: { attackS: 0.8, decayS: 2, sustain: 0.8, releaseS: 1.5 } },
 ]
 
+export type Source = 'waves' | 'fm' | 'auto'
+export const SOURCES: { value: Source; label: string }[] = [
+  { value: 'waves', label: 'The synth’s waves' },
+  { value: 'fm', label: 'Mutant FM' },
+  { value: 'auto', label: 'Whichever fits better' },
+]
+/** Auto takes FM only when it fits this much better (dB): the waves are measured, FM is a model. */
+const FM_MARGIN = 0.5
+
 export interface WavPatchOptions {
   /** Each wave's harmonicLevels (src/ui/waveSpeech.ts waveLevels). */
   levels: (number[] | null)[]
+  source?: Source
   envelope?: Envelope
   /** WaveScan and a filter envelope following how the note changes. */
   overTime?: boolean
@@ -74,8 +93,10 @@ export interface WavPatch {
   patch: Patch
   /** The note to play for the recorded pitch: "C3", "C3 +12 cents". */
   note: string
-  /** The waves played, in WaveScan order (one: no WaveScan). */
+  /** The waves played, in WaveScan order (one: no WaveScan; none with FM). */
   waves: number[]
+  /** Mutant FM instead: its Ratio, Depth (raw) and whether ENV 3 moves the Depth. */
+  fm: { ratio: number; depth: number; envelope: boolean } | null
   filterEnvelope: boolean
   vibrato: Wobble | null
   tremolo: Wobble | null
@@ -178,8 +199,11 @@ export function cutoffRaw(ratio: number, f0: number, midi: number): number {
   return clamp(Math.round(512 + octaveRaw * Math.log2(hz / (hzAt512 * 2 ** ((keytrack * (midi - pivotNote)) / 12)))))
 }
 
-/** The frames that sound (above -40 dB): what timbre over time follows. */
-const sounding = (a: SoundAnalysis) => a.frames.filter((f) => f.db > -40)
+/**
+ * The frames timbre over time follows: within 24 dB of the peak. Quieter tails (a release, a
+ * room) are heard little, yet would set where the filter and Depth settle.
+ */
+const sounding = (a: SoundAnalysis) => a.frames.filter((f) => f.db > -24)
 
 /**
  * How the note's brightness moves: the cutoff (octaves over the pitch) at each sounding frame with
@@ -187,19 +211,43 @@ const sounding = (a: SoundAnalysis) => a.frames.filter((f) => f.db > -40)
  * it moves less than half an octave.
  */
 function brightness(a: SoundAnalysis, levels: number[]) {
+  return envelopeOf(a, (f) => octaves(bestCutoff(f.harmonics.levels, levels).cutoff), 0.5)
+}
+
+/**
+ * An envelope following `value` over the sounding frames, linear (ENV 1 and 3 run so): from its
+ * lower end (where it starts or where it ends) up to its top, then down to where it ends, timed
+ * by the halfway point (exact for a linear fall, half as far off for an exponential one); with
+ * the track (a three-frame median: single frames jump between neighbouring values). Null when it
+ * moves less than `least`.
+ */
+function envelopeOf(a: SoundAnalysis, value: (f: SoundAnalysis['frames'][number]) => number, least: number) {
   const frames = sounding(a)
   if (frames.length < 3) return null
-  const raw = frames.map((f) => octaves(bestCutoff(f.harmonics.levels, levels).cutoff))
-  // A three-frame median: single frames jump between neighbouring cutoffs.
+  const raw = frames.map(value)
   const track = raw.map((_, i) => [raw[i - 1] ?? raw[i], raw[i], raw[i + 1] ?? raw[i]].sort((x, y) => x - y)[1])
   const top = track.indexOf(Math.max(...track))
   const end = track[track.length - 1]
-  const span = track[top] - end
-  if (span < 0.5) return null
-  const fallTo = track.findIndex((v, i) => i > top && v - end <= 0.1 * span)
-  const tTop = frames[top].t - a.onsetS
-  const tFall = (fallTo < 0 ? frames[frames.length - 1].t : frames[fallTo].t) - frames[top].t
-  return { track, endOctaves: end, span, attackS: tTop, decayS: tFall / 0.9 }
+  const base = Math.min(track[0], end)
+  const span = track[top] - base
+  if (span < least) return null
+  const fall = track[top] - end
+  const half = track.findIndex((v, i) => i > top && track[top] - v >= 0.5 * fall)
+  const decayS = fall > 0 && half > 0 ? 2 * (frames[half].t - frames[top].t) : 0
+  return { track, base, span, attackS: frames[top].t - a.onsetS, decayS, sustain: (end - base) / span }
+}
+
+/** The FM Ratio, Depth and cutoff (x pitch) closest to `target`; `ratio` and `cutoff` fix those. */
+export function fitFm(target: number[], ratio?: number, cutoff?: number): { ratio: number; ratioRaw: number; depth: number; cutoff: number; fit: number } {
+  let best = { ratio: 1, ratioRaw: 512, depth: 0, cutoff: Infinity, fit: Infinity }
+  for (const r of FM_RATIOS) {
+    if (ratio !== undefined && r.ratio !== ratio) continue
+    for (const depth of FM_DEPTHS) {
+      const here = bestCutoff(target, fmLevels(r.ratio, depth), cutoff === undefined ? RATIOS : [cutoff])
+      if (here.fit < best.fit) best = { ratio: r.ratio, ratioRaw: r.raw, depth, ...here }
+    }
+  }
+  return best
 }
 
 /**
@@ -241,39 +289,69 @@ function setEnvelope(p: Patch, n: number, adsr: Adsr, amp: boolean) {
   p.set(`${env}bpmsync`, 0)
   p.set(`${env}attacksyncoff`, rawFor(`${env}attacksyncoff`, adsr.attackS * 1000))
   p.set(`${env}holdsyncoff`, 0)
-  const decay = amp ? CALIBRATION.ampDecayFactor : CALIBRATION.filterDecayFactor
+  const decay = amp ? CALIBRATION.ampDecayFactor : CALIBRATION.envDecayFactor
   p.set(`${env}decaysyncoff`, rawFor(`${env}decaysyncoff`, (adsr.decayS * 1000) / decay))
   p.set(`${env}sustain`, clamp(Math.round(adsr.sustain * 1024)))
-  const release = amp ? CALIBRATION.ampReleaseFactor : CALIBRATION.filterDecayFactor
+  const release = amp ? CALIBRATION.ampReleaseFactor : CALIBRATION.envDecayFactor
   p.set(`${env}releasesyncoff`, rawFor(`${env}releasesyncoff`, (adsr.releaseS * 1000) / release))
 }
 
 /** The Init patch turned into one that plays the note in `a`. */
-export function buildWavPatch(a: SoundAnalysis, { levels, envelope = 'detect', overTime = true, wobble = true, name = '' }: WavPatchOptions): WavPatch {
+export function buildWavPatch(
+  a: SoundAnalysis,
+  { levels, source = 'waves', envelope = 'detect', overTime = true, wobble = true, name = '' }: WavPatchOptions,
+): WavPatch {
   const p = new Patch(initPatchBytes())
   p.name = name.slice(0, 16)
-  const { wave, cutoff, fit } = fitWave(a.spectrum.levels, levels)
+  const byWave = source === 'fm' ? null : fitWave(a.spectrum.levels, levels)
+  const byFm = source === 'waves' ? null : fitFm(a.spectrum.levels)
+  const useFm = !!byFm && (!byWave || byFm.fit < byWave.fit - FM_MARGIN)
+  const { cutoff, fit } = useFm ? byFm! : byWave!
 
-  // OSC 1, Filter 1 (keytrack 100 %, so the cutoff keeps its place among the harmonics).
-  p.set('osc1mode', 0)
-  p.set('osc1type', wave)
+  // Filter 1 (keytrack 100 %, so the cutoff keeps its place among the harmonics).
   p.set('filter1type', 0) // LP Ladder 12
   p.set('filter1resonance', 0)
   p.set('filter1keytrack', 768) // 100 %
   p.set('filter1cutoff', cutoffRaw(cutoff, a.f0, a.midi))
+  p.set('osc1mode', 0)
 
-  let waves = [wave]
+  let waves: number[] = []
+  let fm: WavPatch['fm'] = null
   let filterEnvelope = false
-  if (overTime) {
+  if (useFm) {
+    // A Sine on OSC 1 through Mutant 1 (OSC 1 runs through Mutants 1 and 2), all FM.
+    const { ratio, ratioRaw, depth } = byFm!
+    p.set('osc1type', 0) // Sine
+    p.set('mutant1mode', 0) // FM-Linear
+    p.set('mutant1sourcefmlin', 0) // Sine
+    p.set('mutant1ratio', ratioRaw)
+    p.set('mutant1feedback', FM_CALIBRATION.feedback)
+    p.set('mutant1wet', 1024)
+    p.set('mutant1depth', depth)
+    fm = { ratio, depth, envelope: false }
+    // ENV 3 from the lower end's Depth up by the span (a route at depth d moves it d * 8 raw).
+    const moves = overTime ? envelopeOf(a, (f) => fitFm(f.harmonics.levels, ratio, cutoff).depth, 64) : null
+    if (moves) {
+      fm = { ratio, depth: moves.base, envelope: true }
+      p.set('mutant1depth', moves.base)
+      setEnvelope(p, 3, { attackS: moves.attackS, decayS: moves.decayS, sustain: moves.sustain, releaseS: 0.1 }, false)
+      route(p, 1, 3 /* Env 3 */, 'mutant1depth', moves.span / CALIBRATION.routeRawPerDepth)
+    }
+  } else {
+    p.set('osc1type', byWave!.wave)
+    waves = [byWave!.wave]
+  }
+
+  if (overTime && !useFm) {
+    const wave = waves[0]
     const bright = brightness(a, levels[wave]!)
     if (bright) {
-      // ENV 1 from the end's cutoff up by the span; Env 1 Amount scales a full envelope.
+      // ENV 1 from the lower end's cutoff up by the span; Env 1 Amount scales a full envelope.
       filterEnvelope = true
-      const base = 2 ** bright.endOctaves
-      p.set('filter1cutoff', cutoffRaw(base, a.f0, a.midi))
+      p.set('filter1cutoff', cutoffRaw(2 ** bright.base, a.f0, a.midi))
       const lift = (bright.span * CALIBRATION.cutoff.octaveRaw) / CALIBRATION.envAmountCutoffRaw
       p.set('filter1env1amount', clamp(Math.round(512 + lift), 512))
-      setEnvelope(p, 1, { attackS: bright.attackS, decayS: bright.decayS, sustain: 0, releaseS: 0.1 }, false)
+      setEnvelope(p, 1, { attackS: bright.attackS, decayS: bright.decayS, sustain: bright.sustain, releaseS: 0.1 }, false)
     }
     const cutoffs = bright ? bright.track.map((o) => 2 ** o) : sounding(a).map(() => cutoff)
     const scan = scanWaves(a, levels, cutoffs)
@@ -326,6 +404,7 @@ export function buildWavPatch(a: SoundAnalysis, { levels, envelope = 'detect', o
     patch: p,
     note: noteName(a.midi) + (Math.abs(a.cents) >= 5 ? ` ${a.cents > 0 ? '+' : '−'}${Math.abs(a.cents)} cents` : ''),
     waves,
+    fm,
     filterEnvelope,
     vibrato,
     tremolo,
@@ -343,10 +422,13 @@ function route(p: Patch, n: number, source: number, key: string, depth: number) 
 
 /**
  * What the patch plays and how to play it: "Play C3: Saw, 3 waves by WaveScan, filter envelope,
- * vibrato 5.4 Hz; fit 2.1 dB (inharmonic or noisy: best effort)".
+ * vibrato 5.4 Hz; fit 2.1 dB (inharmonic or noisy: best effort)", or with FM "Play C4: Mutant
+ * FM 3:1, depth 12, depth envelope, ...".
  */
-export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'fit' | 'warnings'>): string {
-  const parts = [WAVE_FEATURES[w.waves[0]]?.name ?? `Wave ${w.waves[0]}`]
+export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'fit' | 'warnings'>): string {
+  const parts = w.fm
+    ? [`Mutant FM ${w.fm.ratio}:1, depth ${Math.round(w.fm.depth / 8)}`, ...(w.fm.envelope ? ['depth envelope'] : [])]
+    : [WAVE_FEATURES[w.waves[0]]?.name ?? `Wave ${w.waves[0]}`]
   if (w.waves.length > 1) parts.push(`${w.waves.length} waves by WaveScan`)
   if (w.filterEnvelope) parts.push('filter envelope')
   parts.push(w.vibrato ? `vibrato ${w.vibrato.rateHz.toFixed(1)} Hz` : 'vibrato on the Mod Wheel')
