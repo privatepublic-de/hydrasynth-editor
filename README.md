@@ -4,7 +4,14 @@ A patch editor for the ASM Hydrasynth (Desktop first), over USB MIDI.
 
 ## Running it
 
-Web MIDI only works on a served page, not on a file opened from disk, so the editor
+The editor is published with GitHub Pages (the link is in this repository's About box):
+open it in Chrome, Edge or Firefox (Safari has no Web MIDI), allow MIDI access, click
+Connect. Nothing to install; everything runs in the browser, see the
+[privacy statement](public/privacy.html). Add `?demo` to the address to try it without a synth.
+
+### Offline, from your own computer
+
+Web MIDI only works on a served page, not on a file opened from disk, so offline the editor
 runs from a small local server. It needs [Node.js](https://nodejs.org).
 
 Double-click the launcher for your system in `start/`:
@@ -40,6 +47,12 @@ the patch is, velocity and aftertouch open the filter.
 Best with one note, dry, at least a quarter second long, from about 20 Hz to 2 kHz. The status
 line under the choices says what the patch is made of and the note to play, and when the
 recording isn't one clear note (a rough start).
+
+## Publishing
+
+Every push to `main` runs the tests, builds the editor and publishes `dist/` with GitHub
+Pages (`.github/workflows/pages.yml`). Once per repository: Settings → Pages → Source:
+GitHub Actions. The build uses relative paths (`base: './'`), so it works at any address.
 
 ## Developing
 

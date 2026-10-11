@@ -242,6 +242,9 @@ export function ModuleEditor() {
             <p>
               No synth at hand? <a href="?demo">Try the demo</a> with a built-in patch.
             </p>
+            <p>
+              <a href="privacy.html">Privacy</a>: nothing you do here leaves your browser.
+            </p>
           </div>
         )}
       </section>

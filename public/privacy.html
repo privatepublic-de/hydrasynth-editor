@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy · Hydrasynth Editor</title>
+    <style>
+      :root {
+        --bg: #1d1f21;
+        --panel: #2a2c2f;
+        --edge: #45484d;
+        --text: #f2efe6;
+        --dim: #8d939a;
+        --accent: #f0892c;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.55 system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 32px 16px 64px;
+      }
+      h1 {
+        font-size: 28px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 19px;
+        margin: 32px 0 8px;
+      }
+      p,
+      li {
+        margin: 0 0 10px;
+      }
+      ul {
+        padding-left: 22px;
+      }
+      a {
+        color: var(--accent);
+      }
+      .meta {
+        color: var(--dim);
+        margin-bottom: 24px;
+      }
+      .summary {
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 6px;
+        padding: 14px 18px;
+      }
+      code {
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p><a href="./">← Back to the editor</a></p>
+      <h1>Privacy</h1>
+      <p class="meta">Hydrasynth Editor · last updated 11 October 2026</p>
+
+      <div class="summary">
+        <p>
+          <strong>In short:</strong> the editor runs entirely in your browser. It has no accounts, no cookies, no analytics
+          or tracking, and it loads nothing from other sites. Your patches, backups and recordings never leave your computer.
+        </p>
+        <p>
+          The only personal data involved is your IP address, which GitHub, the host of this page, logs when you open it.
+        </p>
+      </div>
+
+      <h2>Who is responsible</h2>
+      <p>
+        Peter Witzel, <!-- CONTACT: replace this placeholder with a contact address before publishing -->[CONTACT EMAIL]<br />
+        Hydrasynth Editor is a non-commercial hobby project.
+      </p>
+
+      <h2>Hosting by GitHub Pages</h2>
+      <p>
+        This page is hosted on GitHub Pages, a service of GitHub (GitHub, Inc., USA, and GitHub B.V., Prins Bernhardplein 200,
+        1097 JB Amsterdam, Netherlands). When you open the editor, GitHub logs your IP address and stores it for security
+        purposes, as
+        <a href="https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages">GitHub’s documentation</a>
+        states. I have no access to these logs.
+      </p>
+      <p>
+        The legal basis is Art. 6(1)(f) GDPR: the legitimate interest in providing the editor securely and reliably. GitHub
+        may process the data in the USA; GitHub complies with the EU-U.S. Data Privacy Framework. Details are in the
+        <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub Privacy Statement</a>.
+      </p>
+
+      <h2>What the editor does in your browser</h2>
+      <ul>
+        <li>
+          <strong>MIDI:</strong> with your permission, the editor talks to your synth through your browser’s Web MIDI. MIDI
+          data goes only between your browser and the synth.
+        </li>
+        <li>
+          <strong>Files:</strong> backup files and recordings you open are read in your browser, and the files you save
+          (backups, patches) are made there. Nothing is uploaded.
+        </li>
+        <li>
+          <strong>Browser storage:</strong> the MIDI channel you choose is kept in your browser’s local storage
+          (<code>hydrasynth-editor.channel</code>), and some dialog choices in its session storage for the current tab. They
+          stay on your device and are never sent anywhere. Clearing this site’s data in your browser deletes them.
+        </li>
+        <li>
+          <strong>Its own files:</strong> the editor loads its wave data, wave pictures and pronunciation dictionary from
+          this same site, nowhere else.
+        </li>
+      </ul>
+
+      <h2>Links to other sites</h2>
+      <p>
+        The editor’s About dialog links to other sites, such as the projects it builds on and their licenses. If you follow
+        one, that site’s own privacy policy applies.
+      </p>
+
+      <h2>Your rights</h2>
+      <p>
+        Under the GDPR you have the right to access (Art. 15), rectification (Art. 16), erasure (Art. 17), restriction of
+        processing (Art. 18), data portability (Art. 20) and to object to processing based on legitimate interests
+        (Art. 21). You also have the right to lodge a complaint with a data protection supervisory authority (Art. 77),
+        for example in the country where you live.
+      </p>
+      <p>
+        I can’t see GitHub’s logs or tell who you are from them, so requests about that data are best sent to GitHub
+        (<a href="mailto:privacy@github.com">privacy@github.com</a>). You are welcome to contact me as well.
+      </p>
+
+      <h2>Changes</h2>
+      <p>This statement changes when the editor or its hosting does. The current version is always at this address.</p>
+    </main>
+  </body>
+</html>

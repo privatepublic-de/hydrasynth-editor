@@ -47,7 +47,10 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
     <dialog ref={ref} className="write-dialog about-dialog" onClose={onClose}>
       <h2>Hydrasynth Editor</h2>
       <p className="about-dialog__meta">
-        Version {version} · © 2026 Peter Witzel · MIT License
+        Version {version} · © 2026 Peter Witzel · MIT License ·{' '}
+        <a href="privacy.html" target="_blank" rel="noreferrer">
+          Privacy
+        </a>
       </p>
       <p>A patch editor for the ASM Hydrasynth over USB MIDI.</p>
       <p>
