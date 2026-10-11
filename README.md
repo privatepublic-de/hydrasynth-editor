@@ -2,6 +2,10 @@
 
 A patch editor for the ASM Hydrasynth (Desktop first), over USB MIDI.
 
+[![The editor on the Filter 1 page of its demo patch: the module map like the Desktop's panel, a
+filter response curve, knobs with their modulation badges, and pads to play
+notes](docs/screenshot.png)](https://privatepublic-de.github.io/hydrasynth-editor/?demo)
+
 ## Running it
 
 **Open the editor: https://privatepublic-de.github.io/hydrasynth-editor/**
