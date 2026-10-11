@@ -44,6 +44,12 @@ function storedChoices(): Choices {
  * Asks before the whole patch is replaced by one that speaks `text` (src/ui/speechPatch.ts),
  * then loads it. Live, the replacement has no undo, so this says so every time.
  */
+/** What a speech patch says and how long to hold a note for it, the same in the dialog and after it. */
+function speechStatus(speech: { ms: number; dropped: number; sounds: string[] }): string {
+  const left = speech.dropped ? ` (${speech.dropped} sounds left out)` : ''
+  return `Hold a note ${(speech.ms / 1000).toFixed(1)} s${left}: ${speech.sounds.map((s) => s || '·').join(' ')}`
+}
+
 export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (said: string, words: string) => void }) {
   const ref = useRef<HTMLDialogElement>(null)
   const name = useEditor((s) => s.sync?.patch?.name ?? '')
@@ -81,11 +87,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
       patch = buildSpeechPatch(input, { speed: SPEEDS[speed].speed, dictionary, waves, sing })!.patch
     }
     void loadPatch(patch, `Speech patch “${words}”`)
-    onDone(
-      `${speech.sounds.map((s) => s || '·').join(' ')}: hold a note ${(speech.ms / 1000).toFixed(1)} s` +
-        (speech.dropped ? ` (${speech.dropped} sounds left out)` : ''),
-      input,
-    )
+    onDone(speechStatus(speech), input)
   }
 
   const routing =
@@ -151,7 +153,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
       </label>
       <p className="speech-dialog__said" title={routing}>
         {speech
-          ? `Hold a note ${(speech.ms / 1000).toFixed(1)} s${speech.dropped ? ` (${speech.dropped} sounds left out)` : ''}: ${speech.sounds.map((s) => s || '·').join(' ')}`
+          ? speechStatus(speech)
           : 'Nothing to say'}
       </p>
       <div className="write-dialog__actions">
