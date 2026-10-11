@@ -21,6 +21,25 @@ const SPEEDS = [
   { label: 'Fast', speed: 0.75 },
 ]
 
+/** The dialog's choices, kept for the browser session (per-tab convenience only). */
+const CHOICES_KEY = 'hydrasynth-editor.speech'
+type Choices = { speed: number; source: number; pitch: number; sing: boolean }
+const DEFAULT_CHOICES: Choices = { speed: 1, source: 1, pitch: 1, sing: false }
+function storedChoices(): Choices {
+  try {
+    const v = { ...DEFAULT_CHOICES, ...JSON.parse(sessionStorage.getItem(CHOICES_KEY) ?? '{}') }
+    const ok = (i: unknown, n: number) => Number.isInteger(i) && (i as number) >= 0 && (i as number) < n
+    return {
+      speed: ok(v.speed, SPEEDS.length) ? v.speed : DEFAULT_CHOICES.speed,
+      source: ok(v.source, SOURCES.length) ? v.source : DEFAULT_CHOICES.source,
+      pitch: ok(v.pitch, PITCHES.length) ? v.pitch : DEFAULT_CHOICES.pitch,
+      sing: v.sing === true,
+    }
+  } catch {
+    return DEFAULT_CHOICES
+  }
+}
+
 /**
  * Asks before the whole patch is replaced by one that speaks `text` (src/ui/speechPatch.ts),
  * then loads it. Live, the replacement has no undo, so this says so every time.
@@ -31,11 +50,18 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
   const dirty = useEditor((s) => !!s.sync?.dirty)
   const demo = useEditor((s) => s.connection.status === 'demo')
   const loadPatch = useEditor((s) => s.loadPatch)
-  const [speed, setSpeed] = useState(1)
+  const [{ speed, source, pitch, sing }, setChoices] = useState(storedChoices)
+  const choose = (change: Partial<Choices>) =>
+    setChoices((c) => {
+      const next = { ...c, ...change }
+      try {
+        sessionStorage.setItem(CHOICES_KEY, JSON.stringify(next))
+      } catch {
+        // per-tab convenience only
+      }
+      return next
+    })
   const [input, setInput] = useState(text)
-  const [source, setSource] = useState(1)
-  const [pitch, setPitch] = useState(1)
-  const [sing, setSing] = useState(false)
   const [dictionary, setDictionary] = useState<Pronunciations | null>(null)
   useEffect(() => {
     ref.current?.showModal()
@@ -62,39 +88,38 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
     )
   }
 
+  const routing =
+    `${SOURCES[source].says} through ${SOURCES[source].plain ? 'a low-pass (no Vowel filter, no Voice macro)' : 'the Vowel filter'} and noise through Filter 2, ` +
+    `run by one-shot Step LFOs: vowel, voicing, ` +
+    (sing && SOURCES[source].lfo5 === 'melody' ? 'hiss and hiss colour' : `hiss, hiss colour and ${sing ? 'wave' : SOURCES[source].lfo5}`) +
+    (sing ? '; the keys play the tune.' : '.')
+
   return (
-    <dialog ref={ref} className="write-dialog" onCancel={() => onDone('', input)}>
-      <h2>Replace “{name}” with a speech patch?</h2>
+    <dialog ref={ref} className="write-dialog speech-dialog" onCancel={() => onDone('', input)}>
+      <h2>Generate Speech Patch</h2>
+      <p>
+        Replaces all of “{name}” with a patch that says the words on every note.
+        {demo ? '' : ' Can’t be undone.'}
+        {dirty && ' Your unwritten changes are lost.'}
+      </p>
       <label className="speech-dialog__field">
         Words
         <input type="text" value={input} maxLength={60} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && speech && void replace()} />
       </label>
-      <p>
-        A new patch that says {words ? `“${words}”` : 'the words'} on every note replaces the whole patch you’re editing: oscillators, mixer, both filters,
-        envelopes, all five LFOs and the mod matrix.
-        {demo ? '' : ' This can’t be undone.'}
-        {dirty && ` Your changes to “${name}” haven’t been written to the synth.`}
-      </p>
-      <p>
-        {SOURCES[source].says} through {SOURCES[source].plain ? 'a low-pass (no Vowel filter, no Voice macro)' : 'the Vowel filter'} and noise through Filter 2, run by one-shot Step LFOs: vowel, voicing,{' '}
-        {sing && SOURCES[source].lfo5 === 'melody' ? 'hiss and hiss colour' : `hiss, hiss colour and ${sing ? 'wave' : SOURCES[source].lfo5}`}
-        {sing ? '; the keys play the tune' : ''}. {speech ? `It says ${speech.sounds.map((s) => s || '·').join(' ')} in ${(speech.ms / 1000).toFixed(1)} s; hold the note at least that long.` : 'There are no words to say.'}
-        {speech?.dropped ? ` Too long: the last ${speech.dropped} sounds are left out.` : ''}
-      </p>
       <label
         className="speech-dialog__field"
         title="Waves whose harmonics already show the sounds' formants: clearer vowels around the chosen note, less so far from it. A wave per sound changes with each sound but has no melody on its syllables. Without the Vowel filter, only the waves make the vowels: they hold near the chosen note and lose them an octave away."
       >
         Voice
-        <select value={source} onChange={(e) => setSource(Number(e.target.value))}>
+        <select value={source} onChange={(e) => choose({ source: Number(e.target.value) })}>
           {SOURCES.map((s, i) => (
             <option key={s.label} value={i}>
               {s.label}
             </option>
           ))}
         </select>
-        tuned for
-        <select value={pitch} onChange={(e) => setPitch(Number(e.target.value))} disabled={!SOURCES[source].waves}>
+        <span className="speech-dialog__nowrap">tuned for</span>
+        <select value={pitch} onChange={(e) => choose({ pitch: Number(e.target.value) })} disabled={!SOURCES[source].waves}>
           {PITCHES.map((p, i) => (
             <option key={p.label} value={i}>
               {p.label}
@@ -104,7 +129,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
       </label>
       <label className="speech-dialog__field">
         Speed
-        <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
+        <select value={speed} onChange={(e) => choose({ speed: Number(e.target.value) })}>
           {SPEEDS.map((s, i) => (
             <option key={s.label} value={i}>
               {s.label}
@@ -116,15 +141,20 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
         className="speech-dialog__field"
         title="Mono: the keys give the pitch, no melody. Play legato and the phrase goes on at the new note (a short glide between them); let go and the next note starts it again. A phrase ending on a vowel holds it. With a wave per sound, steps are coarser and holding past twice the phrase starts it over. The Mod Wheel (or Macro 5, Freeze) stops the phrase on its current sound while it's up."
       >
-        <input type="checkbox" checked={sing} onChange={(e) => setSing(e.target.checked)} />
+        <input type="checkbox" checked={sing} onChange={(e) => choose({ sing: e.target.checked })} />
         Sing: Mono, play legato over the phrase
       </label>
+      <p className="speech-dialog__said" title={routing}>
+        {speech
+          ? `Hold a note ${(speech.ms / 1000).toFixed(1)} s${speech.dropped ? ` (${speech.dropped} sounds cut)` : ''}: ${speech.sounds.map((s) => s || '·').join(' ')}`
+          : 'Nothing to say'}
+      </p>
       <div className="write-dialog__actions">
         <button type="button" className="function-button" onClick={() => (ref.current?.close(), onDone('', input))}>
           Cancel
         </button>
         <button type="button" className="function-button function-button--primary" onClick={() => void replace()} disabled={!speech}>
-          {dirty ? 'Discard changes and replace' : 'Replace with speech patch'}
+          {dirty ? 'Discard changes and generate' : 'Generate'}
         </button>
       </div>
     </dialog>

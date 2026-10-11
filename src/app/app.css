@@ -1070,6 +1070,23 @@ select {
   border-radius: 3px;
 }
 
+/* Fixed width and a one-line result, so typing doesn't resize the dialog. */
+.speech-dialog {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.speech-dialog__said {
+  margin: 0 0 12px;
+  color: var(--access);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.speech-dialog__nowrap {
+  white-space: nowrap;
+}
+
 .speech-dialog__field {
   display: flex;
   align-items: center;
