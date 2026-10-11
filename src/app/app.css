@@ -1110,6 +1110,25 @@ select {
   margin: 0 0 12px;
 }
 
+.wav-dialog__what {
+  margin: 0 0 12px;
+}
+
+.wav-dialog__what summary {
+  cursor: pointer;
+}
+
+.wav-dialog__what ul {
+  margin: 6px 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 4px;
+}
+
+.wav-dialog__what p {
+  margin: 6px 0;
+}
+
 .speech-dialog__nowrap {
   white-space: nowrap;
 }

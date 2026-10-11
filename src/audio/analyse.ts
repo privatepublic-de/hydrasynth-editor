@@ -194,7 +194,8 @@ export function analyse(audio: Audio): SoundAnalysis {
     vibrato,
     tremolo: wobble(levelTrack, WOBBLE_HOP_S, 1),
     dirt: measureDirt(x, sr, f0, spectrum.amps, bodyFrom, bodyTo, vibrato?.rateHz ?? null),
-    warnings,
+    // A glide is why its note repeats less clearly and spreads between the harmonics: not a warning.
+    warnings: glide ? warnings.filter((w) => w !== 'no clear single note' && w !== 'inharmonic or noisy') : warnings,
   }
 }
 

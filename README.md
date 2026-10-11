@@ -21,6 +21,26 @@ Close the terminal window to stop it. The same thing from a terminal: `npm start
 The port is fixed because the browser remembers the MIDI permission per address.
 `?demo` opens a built-in patch offline.
 
+## A patch from a recording
+
+The patch bar's menu (☰) → Generate patch from WAV… makes a patch from the note in a WAV
+file: a starting point to shape further, not a copy of the recording. It reads the note's
+pitch, its harmonics and how they change, its envelope, vibrato and tremolo, and its noise,
+drift, detune and chorus, and builds the patch from the synth's own waves or Mutant FM (or
+whichever comes closer). Macros (Bright, Timbre, Attack, Release, Dirt, Movement) start where
+the patch is, velocity and aftertouch open the filter.
+
+- **Good starting points:** a single note of a synth, keys, bass, lead, pad, organ, flute or
+  string machine; sung vowels; tonal drums (kicks with their pitch drop, toms, snare bodies).
+- **Rough, but usable:** noise-based percussion and textures (hi-hats, claps, crashes, found
+  sounds): the noise source in the nearest colour through the filter, any key plays it.
+- **A single-note stand-in:** chords, bells and other inharmonic sounds, drum loops, and slides
+  over more than an octave or so.
+
+Best with one note, dry, at least a quarter second long, from about 20 Hz to 2 kHz. The status
+line under the choices says what the patch is made of and the note to play, and when the
+recording isn't one clear note (a rough start).
+
 ## Developing
 
 `npm run dev` serves the editor with live reload at the same address.

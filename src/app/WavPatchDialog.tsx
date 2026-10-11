@@ -122,6 +122,24 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
         <input type="checkbox" checked={choices.dirt} onChange={(e) => choose({ dirt: e.target.checked })} />
         Drift, detune, ensemble and noise as recorded
       </label>
+      <details className="wav-dialog__what">
+        <summary>What it can make</summary>
+        <p>A starting point to shape further, not a copy of the recording.</p>
+        <ul>
+          <li>
+            <strong>Good starting points:</strong> one note of a synth, keys, bass, lead, pad, organ, flute or string machine;
+            sung vowels; tonal drums (kicks with their pitch drop, toms, snare bodies).
+          </li>
+          <li>
+            <strong>Rough, but usable:</strong> hi-hats, claps, crashes and other noise: the noise source through the filter, any
+            key plays it.
+          </li>
+          <li>
+            <strong>A single-note stand-in:</strong> chords, bells, drum loops, long slides.
+          </li>
+        </ul>
+        <p>Best with one note, dry, at least a quarter second long, from about 20 Hz to 2 kHz.</p>
+      </details>
       <p className="speech-dialog__said wav-dialog__said">{status}</p>
       {result && (
         <p className="wav-dialog__next">
