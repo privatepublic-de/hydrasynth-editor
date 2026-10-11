@@ -65,29 +65,32 @@ export function ModuleSelect() {
   const select = useEditor((s) => s.selectModule)
   return (
     <nav className="module-select" aria-label="Module select">
-      <svg viewBox={`0 0 ${W} ${H}`} className="module-select__wires" aria-hidden="true">
-        {BUSES.map((l, i) => (
-          <polyline key={`b${i}`} points={points(l)} className="wire wire--bus" />
+      {/* The map keeps a width its labels fit; narrower windows scroll it sideways. */}
+      <div className="module-select__map">
+        <svg viewBox={`0 0 ${W} ${H}`} className="module-select__wires" aria-hidden="true">
+          {BUSES.map((l, i) => (
+            <polyline key={`b${i}`} points={points(l)} className="wire wire--bus" />
+          ))}
+          {WIRES.map((l, i) => (
+            <polyline key={`w${i}`} points={points(l)} className="wire" />
+          ))}
+          {DOTTED.map((l, i) => (
+            <polyline key={`d${i}`} points={points(l)} className="wire wire--dotted" />
+          ))}
+        </svg>
+        {BUTTONS.map((b) => (
+          <button
+            key={b.id}
+            type="button"
+            className="access-button module-select__button"
+            aria-pressed={selected === b.id}
+            style={{ left: `${(x(b.col) / W) * 100}%`, top: `${(y(b.row) / H) * 100}%` }}
+            onClick={() => select(b.id)}
+          >
+            {b.label}
+          </button>
         ))}
-        {WIRES.map((l, i) => (
-          <polyline key={`w${i}`} points={points(l)} className="wire" />
-        ))}
-        {DOTTED.map((l, i) => (
-          <polyline key={`d${i}`} points={points(l)} className="wire wire--dotted" />
-        ))}
-      </svg>
-      {BUTTONS.map((b) => (
-        <button
-          key={b.id}
-          type="button"
-          className="access-button module-select__button"
-          aria-pressed={selected === b.id}
-          style={{ left: `${(x(b.col) / W) * 100}%`, top: `${(y(b.row) / H) * 100}%` }}
-          onClick={() => select(b.id)}
-        >
-          {b.label}
-        </button>
-      ))}
+      </div>
     </nav>
   )
 }

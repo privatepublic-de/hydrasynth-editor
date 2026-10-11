@@ -305,11 +305,16 @@ select {
 }
 
 .module-select {
-  position: relative;
-  aspect-ratio: 900 / 170;
   background: var(--recess);
   border: 1px solid var(--edge);
   border-radius: 4px;
+  overflow-x: auto;
+}
+
+.module-select__map {
+  position: relative;
+  aspect-ratio: 900 / 170;
+  min-width: 640px;
 }
 
 .module-select__wires {
