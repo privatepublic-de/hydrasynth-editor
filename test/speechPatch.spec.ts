@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { formatValue } from '../src/params/display'
 import { param } from '../src/params/patch'
-import { buildSpeechPatch, CALIBRATION, VOWEL_POS } from '../src/ui/speechPatch'
+import { buildSpeechPatch, VOWEL_POS } from '../src/ui/speechPatch'
 import { harmonicLevels } from '../src/ui/waveSpeech'
 
 const show = (p: ReturnType<typeof buildSpeechPatch>, key: string) => formatValue(param(key), p!.patch.get(key))
@@ -24,12 +24,6 @@ describe('buildSpeechPatch', () => {
       expect(show(s, `modmatrix${l}modsource`)).toBe(`LFO ${l}`)
     }
     expect(s.patch.name).toBe('hello world')
-  })
-
-  it('marks the patch so steps 9-64 play', () => {
-    const { offset, text } = CALIBRATION.extendedMarker
-    const bytes = buildSpeechPatch('hi')!.patch.bytes
-    expect(String.fromCharCode(...bytes.subarray(offset, offset + text.length))).toBe(text)
   })
 
   it('fits the phrase into the steps and ends silent', () => {

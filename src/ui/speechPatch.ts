@@ -49,8 +49,6 @@ export const CALIBRATION = {
    * second, 115 ms at one): at most one step, so longer glides are ramps written into the steps.
    */
   smoothShareOfStep: true,
-  /** Steps 9-64 only play when the patch carries this marker at byte 1766 (factory patches do, Init doesn't). */
-  extendedMarker: { offset: 1766, text: 'ETCD' },
 }
 
 const STEPS = 64
@@ -731,9 +729,8 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   if (!segments.length) return null
   const t = timing(segments, speed, padded ? SING_STEPS : STEPS - 1, padded)!
 
+  // Steps 9-64 need the ETCD marker, which every patch gets on its way to the synth (normalizePatch).
   const p = new Patch(initPatchBytes())
-  const { offset, text: marker } = CALIBRATION.extendedMarker
-  for (let i = 0; i < marker.length; i++) p.bytes[offset + i] = marker.charCodeAt(i)
   p.name = text.trim().slice(0, 16)
 
   // The voice: OSC 1's Saw into the Vowel filter; noise into Filter 2 alone.

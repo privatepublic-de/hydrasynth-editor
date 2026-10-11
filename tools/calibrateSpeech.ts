@@ -33,12 +33,13 @@
 //                    level per 50 ms, to see that nothing replays
 //   sources          each vowel at C2/C3/C4 from a Saw or from its matched wave (src/ui/waveSpeech.ts),
 //                    through the Vowel filter or not: how often it reads as the right vowel
-// The patches carry the ETCD marker, without which the synth ignores LFO steps 9-64.
+// The patches get the ETCD marker, without which the synth ignores LFO steps 9-64, on the way
+// to the synth (normalizePatch).
 // Usage: npx vite-node tools/calibrateSpeech.ts <experiment> [args]
 import { formatValue } from '../src/params/display'
 import { initPatchBytes } from '../src/params/initPatch'
 import { Patch, param } from '../src/params/patch'
-import { buildSpeechPatch, CALIBRATION, VOWEL_POS } from '../src/ui/speechPatch'
+import { buildSpeechPatch, VOWEL_POS } from '../src/ui/speechPatch'
 import { FORMANTS, formantLevels, harmonicLevels, parsePronunciations, similarity, waveFor } from '../src/ui/waveSpeech'
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { melShape, shapeLike } from './speechScore'
@@ -49,10 +50,7 @@ const FILE = 'local/wave-recordings/calibrate-speech.wav'
 const C2 = 65.406
 
 function initPatch(): Patch {
-  const p = new Patch(initPatchBytes())
-  const { offset, text } = CALIBRATION.extendedMarker
-  for (let i = 0; i < text.length; i++) p.bytes[offset + i] = text.charCodeAt(i)
-  return p
+  return new Patch(initPatchBytes())
 }
 
 /** A Step LFO 1 routed to `target` (mod matrix slot 1) at `depth` (raw). */
