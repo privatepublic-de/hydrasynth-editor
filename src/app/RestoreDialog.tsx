@@ -237,6 +237,12 @@ export function RestoreDialog() {
                 Written to {restore.target}, but {r.mismatches.length} read back different: {r.mismatches.slice(0, 8).join(', ')}
                 {r.mismatches.length > 8 ? '…' : ''}.
               </p>
+            ) : r.unchecked?.length ? (
+              <p className="status--error">
+                Written to {restore.target}, but the check stopped before {r.unchecked.length === 1 ? 'one slot' : `${r.unchecked.length} slots`}:{' '}
+                {r.unchecked.slice(0, 8).join(', ')}
+                {r.unchecked.length > 8 ? '…' : ''}. Open them later to check.
+              </p>
             ) : (
               <p>
                 {restore.target} restored and checked: {r.previous.length === 1 ? 'it matches' : `all ${r.previous.length} match`}.

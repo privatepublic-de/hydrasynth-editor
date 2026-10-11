@@ -133,8 +133,8 @@ describe('runRestore', () => {
     )
     expect(result.outcome).toBe('restored')
     expect(synth.flashWrites.length).toBeGreaterThan(0)
-    expect(result.mismatches).toHaveLength(125)
-    expect(result.mismatches[0]).toMatch(/not checked/)
+    expect(result.mismatches).toEqual([])
+    expect(result.unchecked).toHaveLength(125)
   })
 
   it('reports slots that read back different', async () => {

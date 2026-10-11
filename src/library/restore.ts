@@ -36,6 +36,8 @@ export interface RestoreResult {
   previous: StoredPatch[]
   /** Slots that read back different from what was written. */
   mismatches: string[]
+  /** Slots not read back because the run was stopped (the port went away) while checking. */
+  unchecked?: string[]
   /** Per mismatching slot: what reads back different, e.g. "Arp Swing 0 → 50". */
   differences?: Record<string, string[]>
   /**
@@ -127,11 +129,12 @@ export async function runRestore({
   const mismatches: string[] = []
   const differences: Record<string, string[]> = {}
   const filled: Record<string, string[]> = {}
+  const unchecked: string[] = []
   for (const [i, it] of items.entries()) {
     onProgress({ phase: 'verifying', done: i, total })
     // Stopped (the port went away): the rest is unchecked, not wrong.
     if (signal?.aborted) {
-      mismatches.push(...items.slice(i).map((x) => `${slotLabel(x.bank, x.patch)} (not checked)`))
+      unchecked.push(...items.slice(i).map((x) => slotLabel(x.bank, x.patch)))
       break
     }
     try {
@@ -158,8 +161,11 @@ export async function runRestore({
       filled,
       reason: mismatches.length
         ? `The synth didn’t confirm the flash write (${result.error?.message ?? 'no reply'}), and ${mismatches.length} slot(s) don’t hold the restored patch: ${mismatches.slice(0, 8).join(', ')}.`
-        : `The synth didn’t confirm the flash write (${result.error?.message ?? 'no reply'}), but every slot reads back as restored.`,
+        : unchecked.length
+          ? `The synth didn’t confirm the flash write (${result.error?.message ?? 'no reply'}), and the check stopped before ${unchecked.length} slot(s): ${unchecked.slice(0, 8).join(', ')}${unchecked.length > 8 ? '…' : ''}.`
+          : `The synth didn’t confirm the flash write (${result.error?.message ?? 'no reply'}), but every slot reads back as restored.`,
+      unchecked,
     }
   }
-  return { outcome: 'restored', previous, mismatches, differences, filled }
+  return { outcome: 'restored', previous, mismatches, differences, filled, unchecked }
 }
