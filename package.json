@@ -10,7 +10,7 @@
   },
   "author": "Peter Witzel",
   "license": "MIT",
-  "description": "Patch editor for the ASM Hydrasynth (Desktop first) over MIDI",
+  "description": "Patch editor for the ASM Hydrasynth (Desktop first) over USB MIDI",
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@types/pngjs": "^6.0.5",

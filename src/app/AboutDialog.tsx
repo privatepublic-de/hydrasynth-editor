@@ -49,7 +49,7 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
       <p className="about-dialog__meta">
         Version {version} · © 2026 Peter Witzel · MIT License
       </p>
-      <p>A patch editor for the ASM Hydrasynth over MIDI.</p>
+      <p>A patch editor for the ASM Hydrasynth over USB MIDI.</p>
       <p>
         Vibe-coded with{' '}
         <a href="https://claude.com/claude-code" target="_blank" rel="noreferrer">
