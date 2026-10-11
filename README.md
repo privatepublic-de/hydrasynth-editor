@@ -112,7 +112,7 @@ GitHub Actions. The build uses relative paths (`base: './'`), so it works at any
   `local/wave-recordings` (`tools/recordWaves.ts`), that the WAV analysis finds the synth's
   own waves in them.
 
-See `docs/PLAN.md` for the plan, findings and open questions.
+See `docs/FINDINGS.md` for what the editor knows about the synth beyond Edisyn, and what is still open.
 
 Synth settings: MIDI channel as you like, Param TX/RX = NRPN,
 Program Change RX on.

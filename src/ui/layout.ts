@@ -1,7 +1,7 @@
 // How the editor groups params: the Desktop's module buttons and, inside each, its own edit
 // pages, after the owner's manual. A slot's index is the Control knob it sits on (0 = knob 1;
 // knobs 1-4 are the top row, 5-8 the bottom), so a null keeps the knobs after it in place.
-// Kept by hand on purpose (docs/PLAN.md): the generated param data has no notion of pages.
+// Kept by hand on purpose (docs/FINDINGS.md): the generated param data has no notion of pages.
 import { PARAM_BY_KEY } from '../params/patch'
 
 /**
