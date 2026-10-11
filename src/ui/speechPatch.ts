@@ -838,10 +838,10 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     { target: 73, depth: 1024, value: (s) => s.voice / 2, glideMs: tune.voiceGlideMs, end: 0, crisp: true, holds: true }, // Osc 1 Vol
     { target: 77, depth: 1024, value: (s) => s.noise / 2, glideMs: tune.noiseGlideMs, end: 0 }, // Noise Vol
     // Filt 2 Cutoff while noise sounds; while it doesn't, Filter 2 hears nothing and the same curve
-    // carries Formant Control (slot 7, depth CONTROL_DEPTH) for the vowels that need it.
+    // carries Formant Control (route 7, depth CONTROL_DEPTH) for the vowels that need it.
     { target: 96, depth: 768, value: (s) => (s.noise ? (s.band - 512) / 8 : plain ? 0 : (s.control * 8) / CONTROL_DEPTH), glideMs: Math.max(tune.noiseGlideMs, 1), end: 0 },
     stopper
-      ? // LFO 1-5 Rate (slots 5 and 11-14): nothing until the end, then all of them to the bottom.
+      ? // LFO 1-5 Rate (routes 5 and 11-14): nothing until the end, then all of them to the bottom.
         { target: 144, depth: 0, value: () => 0, glideMs: 0, end: 64 }
       : list
       ? // Osc 1 WaveScan: the sound's position (position i of 8 sits at i/7 of the range). One step's glide
@@ -973,7 +973,7 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
     p.set(`macro1depth${i}`, 512 + SPEED_DEPTH * 4)
   }
   // Macro 2, Fundamental: OSC 3, a Saw at the note played, through the Vowel filter with the voice
-  // and following its voicing: the voicing curve (LFO 2) goes to Osc 3 Vol at depth 0 (slot 8),
+  // and following its voicing: the voicing curve (LFO 2) goes to Osc 3 Vol at depth 0 (route 8),
   // and the macro turns that depth up, to +128 at the top (64 of 128 on a Matrix Depth, whose
   // range is twice that). Off at 0.
   p.setMacroName(2, 'Fundamental')
@@ -1000,8 +1000,8 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   // Macro 4, Whisper: the voice turns into breath. A second noise, the Ring Mod of the noise and
   // OSC 2 (noise times a sine is still noise), goes through the Vowel filter with its own level,
   // so it keeps the vowels while the plain noise keeps making the hisses in Filter 2. The voicing
-  // curve (LFO 2) goes to Ring Mod Vol at depth 0 (slot 9); the macro turns that up to +128 and
-  // the voicing's routes to OSC 1 (slot 2) and OSC 3 (slot 8, the Fundamental) down by 128, so 0
+  // curve (LFO 2) goes to Ring Mod Vol at depth 0 (route 9); the macro turns that up to +128 and
+  // the voicing's routes to OSC 1 (route 2) and OSC 3 (route 8, the Fundamental) down by 128, so 0
   // is the voice, 128 a whisper (64 of 128 on a Matrix Depth is 128; calibrateSpeech macrodepth).
   p.setMacroName(4, 'Whisper')
   p.set('osc2type', 0)
@@ -1025,7 +1025,7 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
 
   // Macro 5, Freeze: every LFO's Rate down by up to 1024 raw, so at the top the phrase stops on
   // the sound it's at (0.02 Hz, ~50 s a step) and goes on from there when it's turned back. The Mod
-  // Wheel turns it too (slot 10, Macro 5 at +128), to hold a sound while singing on it.
+  // Wheel turns it too (route 10, Macro 5 at +128), to hold a sound while singing on it.
   p.setMacroName(5, 'Freeze')
   p.set('macro5panelvalue', 0)
   for (let i = 1; i <= 5; i++) {
