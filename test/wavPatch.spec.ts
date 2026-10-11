@@ -248,7 +248,7 @@ describe('buildWavPatch', () => {
     expect(show(drifting.patch, 'modmatrix6modsource')).toBe('LFO 3')
     expect(show(drifting.patch, 'modmatrix6modtarget')).toBe('All Osc Pitch')
     expect(show(drifting.patch, 'lfo3wave')).toBe('Random')
-  })
+  }, 30000) // several analyses of 2 s notes: ~2.5 s here, over 5 s on CI runners
 
   it('plays noise as noise: its colour through the low-pass that shapes it, its filter moving', () => {
     /** `x` through a two-pole low-pass at `hz` (Q 0.54, LP Ladder 12's shape), the cutoff moving if a function. */
