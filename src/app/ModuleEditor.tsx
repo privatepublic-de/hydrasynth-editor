@@ -223,12 +223,27 @@ function useRevealedRow() {
 export function ModuleEditor() {
   const id = useEditor((s) => s.module)
   const hasPatch = useEditor((s) => !!s.sync?.patch)
+  const connected = useEditor((s) => s.connection.status === 'connected')
   const module: ModuleLayout | undefined = MODULES.find((m) => m.id === id)
   useRevealedRow()
   if (!hasPatch) {
     return (
       <section className="module-editor module-editor--empty">
-        <p>Open a patch from the synth to edit it. Its sound changes on the synth as you turn the controls here.</p>
+        {connected ? (
+          <p>Open a patch from the synth to edit it. Its sound changes on the synth as you turn the controls here.</p>
+        ) : (
+          // First visit: what the synth needs before Connect works, and a way in without one.
+          <div className="module-editor__start">
+            <p>Connect the Hydrasynth by USB and switch it on, then click Connect to the Hydrasynth.</p>
+            <p>
+              On the synth, set Param TX/RX to NRPN and Program Change RX to on. Once connected, set the channel
+              beside the pads to the synth&rsquo;s MIDI channel.
+            </p>
+            <p>
+              No synth at hand? <a href="?demo">Try the demo</a> with a built-in patch.
+            </p>
+          </div>
+        )}
       </section>
     )
   }

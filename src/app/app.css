@@ -371,6 +371,15 @@ select {
   color: var(--oled-dim);
 }
 
+.module-editor__start {
+  max-width: 46ch;
+  text-align: center;
+}
+
+.module-editor__start a {
+  color: var(--access);
+}
+
 .module-editor__title {
   font: 600 22px/1 var(--label);
   color: var(--oled-text);
