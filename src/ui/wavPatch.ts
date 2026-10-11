@@ -8,7 +8,8 @@
 //   Mutant 1   FM: a Sine on OSC 1, FM-Linear at the Ratio and Depth whose harmonics best match
 //              the peak (src/ui/fmModel.ts); following how the sound changes, ENV 3 moves the
 //              Depth with the note's (mod matrix route 1 to Mut 1 Depth), and no WaveScan
-//   Filter 1   LP Ladder 12, keytrack 100 % (open with FM): the cutoff that, with the wave, best matches the
+//   Filter 1   LP Ladder 12, keytrack 100 % (open with FM): the cutoff (and Resonance, as measured:
+//              src/ui/ladderResponse.generated.ts) that, with the wave, best matches the
 //              peak; following how the sound changes, ENV 1 (its own Env 1 Amount) follows the
 //              note's brightness when that moves more than half an octave (not with FM: the
 //              cutoff stays at the peak's, and ENV 3 moves the Depth instead)
@@ -19,7 +20,7 @@
 //   ENV 4      a pitch that drops or slides into the note (a kick, a tom, a zap): route 7 to All Osc
 //              Pitch, its Decay and curve shaped like the drop
 //   Dirt       as recorded (src/audio/dirt.ts): noise between the harmonics on the noise source in
-//              the nearest colour, past Filter 1; a pitch that wanders on a Random LFO 3 (route 6, All Osc Pitch);
+//              the nearest colour through Filter 1, a little under the recording's, on a Noise macro; a pitch that wanders on a Random LFO 3 (route 6, All Osc Pitch);
 //              a second voice some cents off on OSC 3, the same wave, OSC 1 as far the other way;
 //              a string machine's ensemble on the two FX: a Chorus at 0.6 Hz before, one at 6 Hz after
 //   Macros     1 Bright (Filt 1 Cutoff), 2 Timbre (FM Depth, WaveScan, or Resonance on one wave),
@@ -42,6 +43,7 @@ import { formatValue } from '../params/display'
 import { initPatchBytes } from '../params/initPatch'
 import { Patch, param } from '../params/patch'
 import { FM_CALIBRATION, FM_DEPTHS, FM_RATIOS, fmLevels } from './fmModel'
+import { LADDER_RESPONSE } from './ladderResponse.generated'
 import { destinationOf } from './modDestinations'
 import { rawFor } from './timeTables'
 import { WAVE_FEATURES } from './waveFeatures.generated'
@@ -88,8 +90,6 @@ export const CALIBRATION = {
     { type: 4, slope: 1.7, db: -3.3 }, // Blue
     { type: 5, slope: 5.6, db: -0.2 }, // Violet
   ],
-  /** The noise into Filter 2 (Noise filter ratio 0:100), open in Series: past Filter 1's cutoff (noiseroute: at Cutoff 384 -12.4 dB as open, against -29.2 through it). */
-  noiseRoute: 1024,
   /**
    * A string machine's two sweeps on the FX: Pre-FX Chorus at 0.6 Hz and Post-FX Chorus at 6 Hz at
    * half the depth, both Feedback 0 and the same wet; what src/audio/dirt.ts reads of each (ensemble,
@@ -165,6 +165,8 @@ export interface WavPatch {
   sub: boolean
   /** Noise instead of a note: the noise source's colour through a low-pass at `cutoffHz` (as at middle C). */
   noise: { colour: string; cutoffHz: number } | null
+  /** Filter 1's Resonance (raw), for a resonant peak the recording has. */
+  resonance: number
   /** A pitch that drops (or rises, negative) this many semitones into the note, on ENV 4. */
   glide: number | null
   /** Mutant FM instead: its Ratio, Depth (raw) and whether ENV 3 moves the Depth. */
@@ -187,33 +189,64 @@ const FLOOR = -60
 
 const clamp = (v: number, lo = 0, hi = 1024) => Math.max(lo, Math.min(hi, v))
 
-/** LP Ladder 12 without resonance at `ratio` times the cutoff: dB (a two-pole low-pass, Q ~0.54). */
-export function lpDb(ratio: number): number {
+/**
+ * LP Ladder 12 at `ratio` times its cutoff and `resonance` (raw, one of LADDER_RESPONSE's): dB. Without
+ * resonance a two-pole low-pass (within 0.7 dB of the synth's); with it as measured (ladder).
+ */
+export function filterDb(ratio: number, resonance = 0): number {
+  if (!resonance || !Number.isFinite(ratio)) return lpDb(ratio)
+  const { firstRatio, perOctave, resonances, db } = LADDER_RESPONSE
+  const row = db[resonances.indexOf(resonance)]
+  const at = Math.log2(ratio / firstRatio) * perOctave
+  if (at <= 0) return row[0]
+  // Past the last measured point, falling as a two-pole low-pass does: 12 dB an octave.
+  if (at >= row.length - 1) return row[row.length - 1] - ((at - (row.length - 1)) / perOctave) * 12
+  const i = Math.floor(at)
+  return row[i] + (row[i + 1] - row[i]) * (at - i)
+}
+
+/** LP Ladder 12 at `ratio` times the cutoff: dB (a two-pole low-pass, Q ~0.54 without resonance). */
+export function lpDb(ratio: number, q = 0.54): number {
   if (!Number.isFinite(ratio)) return 0
-  return -10 * Math.log10((1 - ratio * ratio) ** 2 + (ratio / 0.54) ** 2)
+  return -10 * Math.log10((1 - ratio * ratio) ** 2 + (ratio / q) ** 2)
 }
 
 /**
- * How far `levels` (dB per harmonic, from 0) are from `target`, through a low-pass at `cutoff`
- * times the pitch: RMS of the dB difference, both floored at -60 dB, low harmonics weighted more,
+ * How far `levels` (dB per harmonic, from 0) are from `target`, through LP Ladder 12 at `cutoff`
+ * times the pitch and `resonance` (raw): RMS of the dB difference, both floored at -60 dB, low harmonics weighted more,
  * any overall level difference taken out.
  */
-export function distance(target: number[], levels: number[], cutoff = Infinity): number {
+export function distance(target: number[], levels: number[], cutoff = Infinity, resonance = 0): number {
   const n = Math.min(target.length, levels.length)
+  const filter = filterCurve(cutoff, resonance)
+  let top = -Infinity
+  for (let k = 0; k < n; k++) top = Math.max(top, levels[k] + filter[k])
   let sw = 0
   let sd = 0
   let sdd = 0
-  const shaped = levels.slice(0, n).map((v, k) => v + lpDb((k + 1) / cutoff))
-  const top = Math.max(...shaped)
   for (let k = 0; k < n; k++) {
-    const d = Math.max(target[k], FLOOR) - Math.max(shaped[k] - top, FLOOR)
-    const w = 1 / Math.sqrt(k + 1)
+    const d = Math.max(target[k], FLOOR) - Math.max(levels[k] + filter[k] - top, FLOOR)
+    const w = WEIGHTS[k]
     sw += w
     sd += w * d
     sdd += w * d * d
   }
   const mean = sd / sw
   return Math.sqrt(Math.max(0, sdd / sw - mean * mean))
+}
+
+/** Low harmonics weigh more in `distance`: harmonic k by 1/sqrt(k). */
+const WEIGHTS = Float64Array.from({ length: 128 }, (_, k) => 1 / Math.sqrt(k + 1))
+const curves = new Map<string, Float64Array>()
+/** filterDb at harmonics 1..128 of a cutoff `cutoff` times the pitch: the same few, asked for again and again. */
+function filterCurve(cutoff: number, resonance: number): Float64Array {
+  const key = `${cutoff}/${resonance}`
+  let curve = curves.get(key)
+  if (!curve) {
+    curve = Float64Array.from({ length: 128 }, (_, k) => filterDb((k + 1) / cutoff, resonance))
+    if (curves.size < 4096) curves.set(key, curve)
+  }
+  return curve
 }
 
 const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
@@ -244,23 +277,93 @@ function candidates(levels: (number[] | null)[]) {
 }
 
 /** The cutoff (x pitch, of `ratios`) that best turns `levels` into `target`, a lower one only if CLOSER. */
-function bestCutoff(target: number[], levels: number[], ratios = RATIOS): { cutoff: number; fit: number } {
+function bestCutoff(target: number[], levels: number[], ratios = RATIOS, resonance = 0): { cutoff: number; fit: number } {
   let best = { cutoff: Infinity, fit: Infinity }
   for (const c of ratios) {
-    const fit = distance(target, levels, c)
+    const fit = distance(target, levels, c, resonance)
     if (fit < best.fit - CLOSER) best = { cutoff: c, fit }
   }
   return best
 }
 
+/** Every wave with the cutoff (x pitch) that fits `target` best, the closest first; `cutoff` fixes the cutoff. */
+function rankWaves(target: number[], levels: (number[] | null)[], cutoff?: number, resonance = 0): { wave: number; cutoff: number; fit: number }[] {
+  return candidates(levels)
+    .map(({ wave, l }) => ({ wave, ...bestCutoff(target, l, cutoff === undefined ? RATIOS : [cutoff], resonance) }))
+    .sort((x, y) => x.fit - y.fit)
+}
+
 /** The wave and cutoff (x pitch) closest to `target`; `cutoff` fixes the cutoff. */
-export function fitWave(target: number[], levels: (number[] | null)[], cutoff?: number): { wave: number; cutoff: number; fit: number } {
+export function fitWave(target: number[], levels: (number[] | null)[], cutoff?: number, resonance = 0): { wave: number; cutoff: number; fit: number } {
   let best = { wave: 0, cutoff: Infinity, fit: Infinity }
   for (const { wave, l } of candidates(levels)) {
-    const here = bestCutoff(target, l, cutoff === undefined ? RATIOS : [cutoff])
+    const here = bestCutoff(target, l, cutoff === undefined ? RATIOS : [cutoff], resonance)
     if (here.fit < best.fit) best = { wave, ...here }
   }
   return best
+}
+
+/** The sources a resonant filter is nearly always on: Triangle, TriSaw, Saw, Square, Pulse 1-6. */
+const SIMPLE_WAVES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+/**
+ * The Resonance (raw, of LADDER_RESPONSE's) a recording's filter has, or 0. A resonant peak alone
+ * looks like any bump in a spectrum (a wave's, a formant, FM's): it's only taken where
+ *  - the harmonics swell one after another from the top down, as the peak sweeps through them
+ *    (a filter envelope closing; RESONANT.sweep), or
+ *  - a simple source (SIMPLE_WAVES) fits the frames RESONANT.gain dB closer through the filter with
+ *    resonance than without, and no more than RESONANT.near dB worse than the best of all the waves
+ *    (a saw through a resonant low-pass, not a bell, a sine or FM that a peak happens to fit).
+ * Tested on a Saw and a Square recorded through LP Ladder 12 at known Resonance (tools/
+ * calibrateWavPatch.ts resonanceset): 31 of 32 at 704 and 832 found, none at 0; one false find
+ * among 38 recordings without, a DX marimba played as FM anyway.
+ */
+export function resonanceOf(a: SoundAnalysis, levels: (number[] | null)[]): number {
+  const all = sounding(a)
+  // Every fourth frame (at most 25): enough to judge, a fraction of the time.
+  const frames = all.filter((_, i) => i % Math.max(1, Math.ceil(all.length / 25)) === 0)
+  if (!frames.length) return 0
+  const resonances = LADDER_RESPONSE.resonances.filter((r) => r > 0)
+  // A peak at the fundamental itself turns any wave into a sine: from the second harmonic up.
+  const finite = RATIOS.filter((r) => Number.isFinite(r) && r >= 2)
+  const sources = SIMPLE_WAVES.filter((w) => levels[w])
+  if (!sources.length) return 0
+  /** The best simple source's mean distance over the frames, the cutoff free in each, at `resonance`. */
+  const simple = (resonance: number) =>
+    Math.min(...sources.map((w) => frames.reduce((sum, f) => sum + bestCutoff(f.harmonics.levels, levels[w]!, resonance ? finite : RATIOS, resonance).fit, 0) / frames.length))
+  const plain = simple(0)
+  const byResonance = resonances.map((r) => ({ r, fit: simple(r) })).reduce((x, y) => (y.fit < x.fit ? y : x))
+  if (sweepScore(all) >= RESONANT.sweep) return byResonance.r
+  if (plain - byResonance.fit < RESONANT.gain) return 0
+  // Only now all the waves (the costly part): is a filtered simple source as good as any?
+  const general = frames.reduce((sum, f) => sum + fitWave(f.harmonics.levels, levels).fit, 0) / frames.length
+  return byResonance.fit <= general + RESONANT.near ? byResonance.r : 0
+}
+
+const RESONANT = { sweep: 6, gain: 1, near: 0.3 }
+
+/**
+ * How clearly the harmonics (2-24) swell one after another from the top down, as a resonant peak
+ * sweeping down passes each: the number swelling 6 dB or more over where they start and end (against
+ * the fundamental), times how strongly their swells come in order (the correlation of harmonic and
+ * time, negated). 0 for a note without such a sweep; long resonant sweeps read 7-21.
+ */
+function sweepScore(frames: SoundAnalysis['frames']): number {
+  if (frames.length < 5) return 0
+  const swells: { k: number; t: number }[] = []
+  for (let k = 2; k <= Math.min(24, frames[0].harmonics.amps.length); k++) {
+    const rel = frames.map((f) => 20 * Math.log10((f.harmonics.amps[k - 1] + 1e-9) / (f.harmonics.amps[0] + 1e-9)))
+    const top = Math.max(...rel)
+    if (Math.min(top - rel[0], top - rel[rel.length - 1]) >= 6) swells.push({ k, t: frames[rel.indexOf(top)].t })
+  }
+  const n = swells.length
+  if (n < 3) return 0
+  const mk = swells.reduce((sum, s) => sum + s.k, 0) / n
+  const mt = swells.reduce((sum, s) => sum + s.t, 0) / n
+  const cov = swells.reduce((sum, s) => sum + (s.k - mk) * (s.t - mt), 0)
+  const vk = swells.reduce((sum, s) => sum + (s.k - mk) ** 2, 0)
+  const vt = swells.reduce((sum, s) => sum + (s.t - mt) ** 2, 0)
+  return vk && vt ? n * Math.max(0, -cov / Math.sqrt(vk * vt)) : 0
 }
 
 const octaves = (ratio: number) => Math.log2(Math.min(ratio, 2 ** 7.5))
@@ -284,8 +387,8 @@ const sounding = (a: SoundAnalysis) => a.frames.filter((f) => f.db > -24)
  * the wave `levels`, and an envelope from the end's cutoff up to the brightest and back: null when
  * it moves less than half an octave.
  */
-function brightness(a: SoundAnalysis, levels: number[]) {
-  return envelopeOf(a, (f) => octaves(bestCutoff(f.harmonics.levels, levels).cutoff), 0.5)
+function brightness(a: SoundAnalysis, levels: number[], resonance = 0) {
+  return envelopeOf(a, (f) => octaves(bestCutoff(f.harmonics.levels, levels, RATIOS, resonance).cutoff), 0.5)
 }
 
 /**
@@ -338,9 +441,9 @@ export function fitFm(target: number[], ratio?: number, cutoff?: number): { rati
  * the onset, at most 3 s), cut into equal parts, each part's best wave; null when it's one wave.
  * `cutoffs`: the cutoff (x pitch) at each sounding frame.
  */
-function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: number[], main: number) {
+function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: number[], main: number, resonance = 0) {
   const frames = sounding(a)
-  const best = frames.map((f, i) => fitWave(f.harmonics.levels, levels, cutoffs[i]).wave)
+  const best = frames.map((f, i) => fitWave(f.harmonics.levels, levels, cutoffs[i], resonance).wave)
   // The last frame whose best wave differs from the one before.
   let last = best.length - 1
   while (last > 0 && best[last] === best[last - 1]) last--
@@ -358,7 +461,7 @@ function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: numbe
     const pool = near.length ? near : [indices.reduce((x, f) => (offset(f) < offset(x) ? f : x))]
     let pick = { wave: 0, fit: Infinity }
     for (const { wave, l } of candidates(levels)) {
-      const fit = pool.reduce((sum, f) => sum + distance(frames[f].harmonics.levels, l, cutoffs[f]), 0)
+      const fit = pool.reduce((sum, f) => sum + distance(frames[f].harmonics.levels, l, cutoffs[f], resonance), 0)
       if (fit < pick.fit) pick = { wave, fit }
     }
     return pick.wave
@@ -367,7 +470,10 @@ function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: numbe
   // Worth it only if it plays the note closer than the one wave does: on a steady note, near-equal
   // waves trade places frame by frame, and a sweep through them sounds like nothing but a wobble.
   const at = (f: number) => waves[Math.min(n - 1, Math.round((frames[f].t - a.onsetS) / step))]
-  const gain = frames.reduce((sum, f, i) => sum + distance(f.harmonics.levels, levels[main]!, cutoffs[i]) - distance(f.harmonics.levels, levels[at(i)]!, cutoffs[i]), 0)
+  const gain = frames.reduce(
+    (sum, f, i) => sum + distance(f.harmonics.levels, levels[main]!, cutoffs[i], resonance) - distance(f.harmonics.levels, levels[at(i)]!, cutoffs[i], resonance),
+    0,
+  )
   return gain / frames.length >= SCAN_GAIN ? { waves, spanS } : null
 }
 
@@ -375,7 +481,17 @@ function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: numbe
  * How much dirt a recording needs before the patch plays it: more than a clean synth recording
  * reads (noise -55..-70 dB, drift under 1 cent, 2-3 where a filter or WaveScan moves the phase).
  */
-const DIRT = { noiseDb: -50, driftCents: 2.5, driftMaxCents: 8, detuneCents: 2 }
+const DIRT = { noiseDb: -50, noiseUnderDb: 3, driftCents: 2.5, driftMaxCents: 8, detuneCents: 2 }
+
+/**
+ * How much (dB, 0 or less) LP Ladder 12 at `cutoffHz` takes off a noise of `slope` dB an octave,
+ * over the octave bands its level was read in (250 Hz to 16 kHz, src/audio/dirt.ts).
+ */
+function noiseFilterLoss(slope: number, cutoffHz: number): number {
+  const bands = BAND_HZ.filter((hz) => hz >= 250)
+  const power = (filtered: boolean) => bands.reduce((sum, hz) => sum + hz * 10 ** ((slope * Math.log2(hz / 1000) + (filtered ? lpDb(hz / cutoffHz) : 0)) / 10), 0)
+  return 10 * Math.log10(power(true) / power(false))
+}
 
 /** The Sine (wave 0), and how far (dB) a wave's fundamental may fall short before OSC 2 plays one under it. */
 const SINE = 0
@@ -405,7 +521,10 @@ export function buildWavPatch(
   if (isNoise(a)) return buildNoisePatch(a, { levels, envelope, overTime, name })
   const p = new Patch(initPatchBytes())
   p.name = name.slice(0, 16)
-  const byWave = source === 'fm' ? null : fitWave(a.spectrum.levels, levels)
+  // A resonant filter where the recording shows one; the wave then chosen at that resonance, so
+  // a wave's own bump doesn't stand in for the peak.
+  const found = source === 'fm' ? 0 : resonanceOf(a, levels)
+  const byWave = source === 'fm' ? null : { ...fitWave(a.spectrum.levels, levels, undefined, found), resonance: found }
   // FM through an open filter: its Depth carries the brightness, as on a DX; a cutoff fitted at the
   // peak trimmed the bright start of a falling Depth, and the level then swelled in as it fell.
   const byFm = source === 'waves' ? null : fitFm(a.spectrum.levels, undefined, Infinity)
@@ -413,8 +532,9 @@ export function buildWavPatch(
   const { cutoff, fit } = useFm ? byFm! : byWave!
 
   // Filter 1 (keytrack 100 %, so the cutoff keeps its place among the harmonics).
+  const resonance = useFm ? 0 : byWave!.resonance
   p.set('filter1type', 0) // LP Ladder 12
-  p.set('filter1resonance', 0)
+  p.set('filter1resonance', resonance)
   p.set('filter1keytrack', 768) // 100 %
   p.set('filter1cutoff', cutoffRaw(cutoff, a.f0, a.midi))
   p.set('osc1mode', 0)
@@ -465,7 +585,7 @@ export function buildWavPatch(
   }
 
   if (overTime && !useFm) {
-    const bright = brightness(a, levels[wave]!)
+    const bright = brightness(a, levels[wave]!, resonance)
     if (bright) {
       // ENV 1 from the lower end's cutoff up by the span; Env 1 Amount scales a full envelope.
       filterEnvelope = true
@@ -475,7 +595,7 @@ export function buildWavPatch(
       setEnvelope(p, 1, { attackS: bright.attackS, decayS: bright.decayS, sustain: bright.sustain, releaseS: 0.1 }, false)
     }
     const cutoffs = bright ? bright.track.map((o) => 2 ** o) : sounding(a).map(() => cutoff)
-    const scan = scanWaves(a, levels, cutoffs, wave)
+    const scan = scanWaves(a, levels, cutoffs, wave, resonance)
     if (scan) {
       // OSC 1 scans the waves (positions 2-8 store Off and Silence ahead of them; unused ones Off),
       // ENV 3 rising through them over the span: position i of 8 at i/7 of the range.
@@ -544,9 +664,11 @@ export function buildWavPatch(
       // The colour nearest its slope, at the level that puts it as far under the harmonics.
       const colour = CALIBRATION.noise.reduce((x, c) => (Math.abs(c.slope - noise.slope) < Math.abs(x.slope - noise.slope) ? c : x))
       p.set('noisetype', colour.type)
-      p.set('mixernoisevol', clamp(Math.round(1024 * 10 ** ((noise.db - colour.db) / 40))))
-      // Past Filter 1, into Filter 2 (open in Series): a recording's hiss isn't filtered with the note (noiseroute).
-      p.set('mixernoisefilterratio', CALIBRATION.noiseRoute)
+      // Through Filter 1, so it darkens and fades with the note as a synth's own noise does (past it,
+      // it stayed bright in a closing tail and stood out), raised by what the cutoff at the peak takes
+      // away there; and DIRT.noiseUnderDb under the recording's: a start, the Noise macro adds more.
+      const loss = noiseFilterLoss(colour.slope, cutoff * a.f0)
+      p.set('mixernoisevol', clamp(Math.round(1024 * 10 ** ((noise.db - DIRT.noiseUnderDb - colour.db - loss) / 40))))
       added.noise = formatValue(param('noisetype'), colour.type)
     }
     if (detune && detune.cents >= DIRT.detuneCents && !useFm) {
@@ -584,7 +706,7 @@ export function buildWavPatch(
   }
 
   const timbre: Timbre = fm ? ['mutant1depth', 'Timbre', 384, 'middle'] : waves.length > 1 ? ['osc1wavscan', 'Timbre', 512, 'bottom'] : RESONANCE
-  const macros = finish(p, filterEnvelope, timbre, filterEnvelope ? 'filter1env1amount' : fm?.envelope || waves.length > 1 ? 'modmatrix1depth' : null)
+  const macros = finish(p, filterEnvelope, timbre, filterEnvelope ? 'filter1env1amount' : fm?.envelope || waves.length > 1 ? 'modmatrix1depth' : null, !!added.noise)
 
   return {
     patch: p,
@@ -592,6 +714,7 @@ export function buildWavPatch(
     waves,
     sub,
     dirt: added,
+    resonance,
     glide,
     fm,
     noise: null,
@@ -610,9 +733,10 @@ const RESONANCE: Timbre = ['filter1resonance', 'Resonance', 640, 'bottom']
 
 /**
  * The same for every patch: velocity on the Amp envelope and the filter, aftertouch on the filter,
- * and the macros (`moving`: what Movement scales, if anything moves). Returns the macros' names.
+ * and the macros (`moving`: what Movement scales, if anything moves; `noise`: a Noise macro for the
+ * noise the recording had). Returns the macros' names.
  */
-function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: string | null): string[] {
+function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: string | null, noise = false): string[] {
   // Playing: velocity on the Amp envelope and the filter, aftertouch on the filter.
   p.set('ampvelenv', 512 + PLAYING.ampVelocity * 8)
   if (filterEnvelope) p.set('filter1velenv', 512 + PLAYING.filterVelocity * 8)
@@ -635,6 +759,11 @@ function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: strin
   knob('filter1drive', 'Dirt', 512, 'bottom')
   // Movement: none at the knob's bottom, as generated in its middle, twice as much at the top.
   if (moving) knob(moving, 'Movement', 2 * Math.min(512, p.get(moving) - 512))
+  // Noise: none at the bottom, as generated in the middle (twice as loud at the top), so more or less is one knob.
+  if (noise) {
+    const v = p.get('mixernoisevol')
+    knob('mixernoisevol', 'Noise', v <= 512 ? 2 * v : v)
+  }
   return macros
 }
 
@@ -708,6 +837,7 @@ function buildNoisePatch(a: SoundAnalysis, { envelope = 'detect', overTime = tru
     waves: [],
     sub: false,
     dirt: { noise: null, drift: null, detune: null, ensemble: false },
+    resonance: 0,
     glide: null,
     fm: null,
     noise: { colour: formatValue(param('noisetype'), type), cutoffHz },
@@ -741,7 +871,11 @@ function setMacro(p: Patch, n: number, name: string, key: string, span: number, 
   span = 2 * Math.round(span / 2) // the macro's depth (raw 512 + span / 2) stays whole
   let knob = 0
   if (from === 'middle' && v - span / 2 >= 0 && v + span / 2 <= 1024) knob = 512
-  else if (v + span > 1024) knob = 1024
+  else if (v + span > 1024) {
+    // From the top: the knob's range ends at the value, so it may reach no further down than 0.
+    knob = 1024
+    span = Math.min(span, 2 * Math.floor(v / 2))
+  }
   p.set(key, v - (span * knob) / 1024)
   p.setMacroName(n, name)
   p.set(`macro${n}target1`, destinationOf(key)!)
@@ -765,7 +899,7 @@ function route(p: Patch, n: number, source: number, key: string, depth: number) 
  * filter envelope, vibrato on the Mod Wheel", or with FM "Play C4: Mutant FM 3:1, its depth
  * moving, ..."; a recording that isn't one clear note says so: "(noisy: a rough start)".
  */
-export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 'glide' | 'noise' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
+export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 'resonance' | 'glide' | 'noise' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
   const name = (wave: number) => WAVE_FEATURES[wave]?.name ?? `Wave ${wave}`
   // The waves in the order they play, each once in a row; past three, the first and the last.
   const order = w.waves.filter((v, i) => v !== w.waves[i - 1]).map(name)
@@ -779,7 +913,8 @@ export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 
     ? [`Mutant FM ${w.fm.ratio}:1${w.fm.envelope ? ', its depth moving' : ''}`]
     : [`${scan.join(' → ')}${w.waves.length > 1 ? ' by WaveScan' : ''}${w.sub ? ' over a Sine' : ''}`]
   if (w.glide) parts.push(`pitch ${w.glide > 0 ? 'dropping' : 'rising'} ${Math.abs(w.glide)} semitones into it`)
-  if (w.filterEnvelope) parts.push('filter envelope')
+  if (w.resonance) parts.push(w.filterEnvelope ? 'resonant filter envelope' : 'resonant filter')
+  else if (w.filterEnvelope) parts.push('filter envelope')
   if (w.dirt.detune) parts.push(`OSC 3 ${w.dirt.detune} cents apart`)
   if (w.dirt.ensemble) parts.push('ensemble')
   if (w.dirt.drift) parts.push('drifting')

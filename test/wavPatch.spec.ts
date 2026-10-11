@@ -10,7 +10,7 @@ import { WAVE_FEATURES } from '../src/ui/waveFeatures.generated'
 import { harmonicAmps, harmonicLevels } from '../src/ui/waveSpeech'
 import { FM_CALIBRATION } from '../src/ui/fmModel'
 import { destinationOf } from '../src/ui/modDestinations'
-import { buildWavPatch, CALIBRATION, distance, fitFm, fitWave, wavStatus } from '../src/ui/wavPatch'
+import { buildWavPatch, CALIBRATION, distance, filterDb, fitFm, fitWave, wavStatus } from '../src/ui/wavPatch'
 import { ensemble, noise, RATE, sawAmps, tone } from './signals'
 
 const data = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8'))
@@ -218,7 +218,14 @@ describe('buildWavPatch', () => {
 
     const noisy = buildWavPatch(analyse({ samples: mix(tone(f0, sawAmps(f0), 2), noise(2).map((v) => v * 0.25)), sampleRate: RATE }), { levels })
     expect(noisy.dirt.noise).toBe('White')
-    expect(noisy.patch.get('mixernoisevol')).toBeGreaterThan(0)
+    expect(played(noisy.patch, 'mixernoisevol')).toBeGreaterThan(0)
+    // Through Filter 1, with the note; a Noise macro, the generated level in its middle.
+    expect(show(noisy.patch, 'mixernoisefilterratio')).toBe('100:0')
+    expect(noisy.macros).toContain('Noise')
+    const knob = noisy.macros.indexOf('Noise') + 1
+    expect(show(noisy.patch, `macro${knob}target1`)).toBe('Noise Vol')
+    expect(noisy.patch.get(`macro${knob}panelvalue`)).toBe(512)
+    expect(clean.macros).not.toContain('Noise')
     expect(wavStatus(noisy)).toContain('white noise')
     const noisyAnalysis = analyse({ samples: mix(tone(f0, sawAmps(f0), 2), noise(2).map((v) => v * 0.25)), sampleRate: RATE })
     expect(buildWavPatch(noisyAnalysis, { levels, dirt: false }).dirt.noise).toBeNull()
@@ -301,6 +308,24 @@ describe('buildWavPatch', () => {
     expect(labelNumber(show(w.patch, 'env4decaysyncoff'))).toBeLessThan(400)
     expect(wavStatus(w)).toContain(`pitch dropping ${w.glide} semitones into it`)
     expect(buildWavPatch(saw, { levels }).glide).toBeNull()
+  })
+
+  it('hears a resonant filter, and not in a plain saw, a sine or a bell', () => {
+    // A saw through LP Ladder 12 as measured (src/ui/ladderResponse.generated.ts) at 8x the pitch.
+    const through = (resonance: number) => sawAmps(110, 8000).map((amp, k) => amp * 10 ** (filterDb((k + 1) / 8, resonance) / 20))
+    for (const resonance of [704, 832]) {
+      const w = buildWavPatch(analyse({ samples: tone(110, through(resonance), 1), sampleRate: RATE }), { levels })
+      expect(w.resonance, `resonance ${resonance}`).toBeGreaterThanOrEqual(512)
+      // As played, through the Resonance macro at its knob: the resonance found, exactly.
+      expect(played(w.patch, 'filter1resonance')).toBe(w.resonance)
+      expect(show(w.patch, 'filter1resonance')).not.toBe('0.0')
+      expect(wavStatus(w)).toContain('resonant filter')
+    }
+    expect(buildWavPatch(analyse({ samples: tone(110, through(0), 1), sampleRate: RATE }), { levels }).resonance).toBe(0)
+    expect(buildWavPatch(analyse({ samples: tone(220, [0.5, 0.01], 1), sampleRate: RATE }), { levels }).resonance).toBe(0)
+    // A bell: a few partials at harmonic places, far apart, each with a peak of its own.
+    const bell = tone(110, Array.from({ length: 24 }, (_, k) => ([0, 2, 6, 11, 17].includes(k) ? 0.3 / (1 + k / 4) : 0)), 1, { level: (t) => Math.exp(-t / 0.5) })
+    expect(buildWavPatch(analyse({ samples: bell, sampleRate: RATE }), { levels }).resonance).toBe(0)
   })
 
   it('names what may be off in the status', () => {

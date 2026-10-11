@@ -28,9 +28,21 @@
 //              matches a recording's chorus against
 //   pitchenv   ENV 4 on All Osc Pitch (mod matrix route 1), a Sine at C3: semitones per route depth with
 //              ENV 4 held full, and the pitch over time as it decays from full (Decay 896 ms, Sustain 0)
+//   resonance  a Saw through LP Ladder 12 at Cutoff 448 and 576, Resonance 0..896 (C3): the cutoff and
+//              the Q of a two-pole low-pass that fit each
+//   ladder     white noise through LP Ladder 12 at Cutoff 512 (C3, keytrack 100 %: 1288 Hz) at Resonance 0..832:
+//              its response (dB against the noise unfiltered) every 1/12 octave, as a multiple of 1288 Hz;
+//              written to src/ui/ladderResponse.generated.ts. Also at Cutoff 384 and 640, to check the
+//              shape moves with the cutoff
+//   resonanceset  Saw and Square through LP Ladder 12 at Resonance 0, 512, 704 and 832, the filter still
+//              at Cutoff 448 and 576 or swept by ENV 1 (from 832, Decay 448 ms), at C2 and C3, long
+//              (1.5 s) and the sweep short (0.25 s): WAVs with known resonance in local/wav-tests/rig-res,
+//              for testing a detector
 //   tremolo    a Sine LFO 2 at 4 Hz through Amp LFO 2 Amount +16: dB to either side
 // Usage: npx vite-node tools/calibrateWavPatch.ts <experiment>
+import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { analyse } from '../src/audio/analyse'
+import { fft } from '../src/audio/fft'
 import { detectPeriod } from '../src/audio/pitch'
 import { harmonicsAt } from '../src/audio/spectrum'
 import { formatValue } from '../src/params/display'
@@ -398,6 +410,104 @@ async function main() {
         const track = pitchTrack(f32(await synth.take(p, note, 2)))
         console.log(`decay 896 ms, curve ${show('env4deccurve', curve)}: ${track.slice(0, 30).map((v, i) => (i % 2 ? '' : `${i * 40}ms ${v.toFixed(1)}`)).filter(Boolean).join('  ')}`)
       }
+    } else if (experiment === 'resonance') {
+      const note = 48
+      const f0 = hz(note)
+      const count = Math.min(128, Math.floor(16000 / f0))
+      const open = harmonicDb(await synth.take(sawPatch(), note, 1), f0, count)
+      const top = Math.max(...open)
+      for (const cutoff of [448, 576])
+        for (const resonance of [0, 256, 512, 640, 768, 896]) {
+          const p = sawPatch(cutoff)
+          p.set('filter1resonance', resonance)
+          const got = harmonicDb(await synth.take(p, note, 1), f0, count)
+          let best = { ratio: 1, q: 0.5, rms: Infinity }
+          for (let o = 0; o <= 7; o += 1 / 32)
+            for (let q = 0.4; q <= 12; q *= 1.06) {
+              const d = open.flatMap((v, k) => (v < top - 50 || got[k] < top - 70 ? [] : [got[k] - v - lpDb((k + 1) / 2 ** o, q)]))
+              if (d.length < 3) continue
+              const mean = d.reduce((s, v) => s + v, 0) / d.length
+              const rms = Math.sqrt(d.reduce((s, v) => s + (v - mean) ** 2, 0) / d.length)
+              if (rms < best.rms) best = { ratio: 2 ** o, q, rms }
+            }
+          console.log(`cutoff ${cutoff}, resonance ${show('filter1resonance', resonance)}: ${(best.ratio * f0).toFixed(0)} Hz, Q ${best.q.toFixed(2)}, fit ${best.rms.toFixed(1)} dB`)
+        }
+    } else if (experiment === 'ladder') {
+      const note = 48
+      const nominal = 1288 // Hz at Cutoff 512, C3 (CALIBRATION.cutoff)
+      const grid = Array.from({ length: 97 }, (_, i) => 62.5 * 2 ** (i / 12)) // 62.5 Hz .. 16 kHz
+      /** Power density (dB) at each grid frequency (1/12 octave wide), Welch over 0.3..1.5 s. */
+      const spectrum = (x: Float64Array) => {
+        const n = 8192
+        const acc = new Float64Array(n / 2)
+        let windows = 0
+        for (let s = Math.round(0.3 * RATE); s + n < Math.round(1.5 * RATE); s += n / 2, windows++) {
+          const re = new Float64Array(n)
+          const im = new Float64Array(n)
+          for (let i = 0; i < n; i++) re[i] = x[s + i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1)))
+          fft(re, im)
+          for (let b = 0; b < n / 2; b++) acc[b] += re[b] ** 2 + im[b] ** 2
+        }
+        return grid.map((hz) => {
+          const lo = Math.floor(hz / 2 ** (1 / 24) / (RATE / n))
+          const hi = Math.max(lo, Math.ceil((hz * 2 ** (1 / 24)) / (RATE / n)))
+          let sum = 0
+          for (let b = lo; b <= hi; b++) sum += acc[b]
+          return 10 * Math.log10(sum / (hi - lo + 1) / windows + 1e-30)
+        })
+      }
+      const noisePatch = (cutoff: number, resonance: number) => {
+        const p = sawPatch(cutoff)
+        p.set('mixerosc1vol', 0)
+        p.set('mixernoisevol', 1024)
+        p.set('noisetype', 0)
+        p.set('filter1resonance', resonance)
+        return p
+      }
+      const open = spectrum(await synth.take(noisePatch(1024, 0), note, 1.6))
+      const resonances = [0, 256, 384, 512, 640, 704, 768, 832]
+      const table: number[][] = []
+      for (const resonance of resonances) {
+        const response = spectrum(await synth.take(noisePatch(512, resonance), note, 1.6)).map((v, i) => Math.round((v - open[i]) * 10) / 10)
+        table.push(response)
+        const peak = Math.max(...response)
+        console.log(`resonance ${show('filter1resonance', resonance)}: peak ${peak.toFixed(1)} dB at ${(grid[response.indexOf(peak)] / nominal).toFixed(2)}x, at 0.25x ${response[grid.findIndex((hz) => hz >= nominal / 4)].toFixed(1)} dB`)
+      }
+      for (const cutoff of [384, 640]) {
+        const response = spectrum(await synth.take(noisePatch(cutoff, 768), note, 1.6)).map((v, i) => v - open[i])
+        const peak = Math.max(...response)
+        const ratio = grid[response.indexOf(peak)] / (nominal * 2 ** ((cutoff - 512) / 89.5))
+        console.log(`cutoff ${cutoff}, resonance 96: peak ${peak.toFixed(1)} dB at ${ratio.toFixed(2)}x its cutoff (at 512: ${(grid[table[6].indexOf(Math.max(...table[6]))] / nominal).toFixed(2)}x)`)
+      }
+      writeFileSync(
+        'src/ui/ladderResponse.generated.ts',
+        `// Generated by tools/calibrateWavPatch.ts ladder: LP Ladder 12's response, measured on the synth with its white
+// noise at Cutoff 512 (C3, keytrack 100 %: ${nominal} Hz), per Resonance (raw): dB against the noise unfiltered, every
+// 1/12 octave from ${(grid[0] / nominal).toFixed(4)} times the cutoff.
+export const LADDER_RESPONSE = ${JSON.stringify({ firstRatio: grid[0] / nominal, perOctave: 12, resonances, db: table })}
+`,
+      )
+    } else if (experiment === 'resonanceset') {
+      const dir = 'local/wav-tests/rig-res'
+      mkdirSync(dir, { recursive: true })
+      for (const [source, type] of [['saw', 3], ['square', 4]] as const)
+        for (const resonance of [0, 512, 704, 832])
+          for (const filter of ['448', '576', 'sweep', 'sweep-short'])
+            for (const note of [36, 48]) {
+              const p = sawPatch(filter === '448' ? 448 : filter === '576' ? 576 : 320)
+              p.set('osc1type', type)
+              p.set('filter1resonance', resonance)
+              if (filter.startsWith('sweep')) {
+                p.set('env1attacksyncoff', 0)
+                p.set('env1decaysyncoff', 448)
+                p.set('env1sustain', 0)
+                p.set('filter1env1amount', 512 + 336) // up to ~832 at the top
+              }
+              await synth.take(p, note, filter === 'sweep-short' ? 0.25 : 1.5)
+              const name = `${source}-res${resonance}-${filter}-${note === 36 ? 'C2' : 'C3'}.wav`
+              copyFileSync(FILE, `${dir}/${name}`)
+              console.log(name)
+            }
     } else if (experiment === 'tremolo') {
       for (const amount of [576, 640, 768, 1024]) {
         const p = sawPatch()

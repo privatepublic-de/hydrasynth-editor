@@ -312,11 +312,16 @@ function slope(v: number[], hopS: number): number {
   return sxy / sxx / hopS
 }
 
-/** Seconds of a linear rise to the peak, from 10 % to 90 % of it on the level curve `c`. */
+/**
+ * Seconds of a linear rise to the peak, from how long the curve `c` takes from 10 % to half the
+ * loudest (a linear rise is half way at half its time): what's heard as the attack. Many sounds are
+ * nearly there fast and then creep up the last few dB for a second or more (a filter opening, an
+ * ensemble beating, a swell after the strike); timed to 90 %, that creep made attacks far too slow.
+ */
 function attackOf(c: ReturnType<typeof levelCurve>): number {
-  let t90 = c.onset
-  while (t90 < c.ip && c.rel[t90] < -0.9) t90++
-  return ((t90 - c.onset) * HOP_S) / 0.8
+  let half = c.onset
+  while (half < c.ip && c.rel[half] < -6) half++
+  return ((half - c.onset) * HOP_S) / 0.4
 }
 
 /**
