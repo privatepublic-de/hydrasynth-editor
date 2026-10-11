@@ -23,7 +23,7 @@ The port is fixed because the browser remembers the MIDI permission per address.
 ## Developing
 
 `npm run dev` serves the editor with live reload at the same address.
-`/probe.html` is the protocol test page used during development.
+`/probe.html` (dev server only) is the protocol test page used during development.
 
 
 - `src/sysex/codec.ts`: the SysEx envelope (base64 + CRC-32 checksum)
