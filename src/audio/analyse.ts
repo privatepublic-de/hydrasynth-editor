@@ -112,7 +112,9 @@ export function analyse(audio: Audio): SoundAnalysis {
   const frames: Snapshot[] = []
   const window = Math.max(8 * period, 0.04 * sr)
   const last = Math.min(at(iEnd), at(onset) + MAX_FRAMES_S * sr)
-  for (let t = at(onset); t <= last; t += FRAME_S * sr) {
+  // Every FRAME_S, or half a window where one is longer than 0.25 s (eight periods under 32 Hz).
+  const frameHop = window > 0.25 * sr ? window / 2 : FRAME_S * sr
+  for (let t = at(onset); t <= last; t += frameHop) {
     const a = Math.max(0, Math.round(t - window / 2))
     const b = Math.min(x.length, a + window)
     if (b - a < 4 * period) continue

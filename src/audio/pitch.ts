@@ -1,8 +1,8 @@
-// The pitch of a recorded note, at any pitch from 30 Hz to 2 kHz: McLeod's normalised square
+// The pitch of a recorded note, at any pitch from 20 Hz to 2 kHz: McLeod's normalised square
 // difference (NSDF), its first strong peak taken (so a weak fundamental doesn't read an octave
 // up), then pinned down over many periods as tools/waveAudio.ts `period` does for the C2 waves.
 
-const F0_MIN = 30
+const F0_MIN = 20
 const F0_MAX = 2000
 
 /** NSDF of `x[from..from+length)` at lag `lag`: 1 for a perfect repeat, about 0 for none. */

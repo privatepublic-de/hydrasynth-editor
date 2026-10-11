@@ -38,6 +38,15 @@ describe('pitch', () => {
       }
   })
 
+  it('finds a sub note down to 20 Hz', () => {
+    for (const f0 of [21.83, 27.5]) {
+      const x = tone(f0, sawAmps(f0, 5000), 1)
+      const { period } = detectPeriod(x, RATE)
+      expect(Math.abs(cents(RATE / period, f0)), `${f0} Hz`).toBeLessThan(5)
+      expect(analyse({ samples: x, sampleRate: RATE }).midi).toBe(f0 < 25 ? 17 : 21)
+    }
+  })
+
   it('keeps the note when its fundamental is weak', () => {
     const x = tone(110, [0.05, 1, 0.6, 0.4, 0.3], 0.4)
     const { period } = detectPeriod(x, RATE)
