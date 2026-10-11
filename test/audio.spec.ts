@@ -3,7 +3,7 @@ import { analyse, wobble } from '../src/audio/analyse'
 import { detectPeriod, noteName, noteOf } from '../src/audio/pitch'
 import { harmonicsAt } from '../src/audio/spectrum'
 import { parseWav } from '../src/audio/wav'
-import { noise, RATE, sawAmps, tone, wavBytes } from './signals'
+import { ensemble, noise, RATE, sawAmps, tone, wavBytes } from './signals'
 
 const cents = (a: number, b: number) => 1200 * Math.log2(a / b)
 
@@ -160,7 +160,7 @@ describe('dirt', () => {
       const d = dirtOf(tone(f0, sawAmps(f0), 2))
       expect(d.drift, `${f0} Hz`).toBeLessThan(0.5)
       expect(d.detune).toBeNull()
-      expect(d.ensemble).toBeNull()
+      expect(d.chorus).toBeNull()
       expect(d.noise?.db ?? -100).toBeLessThan(-50)
     }
   })
@@ -174,7 +174,7 @@ describe('dirt', () => {
     }
     const d = dirtOf(pluck)
     expect(d.detune).toBeNull()
-    expect(d.ensemble).toBeNull()
+    expect(d.chorus).toBeNull()
     expect(d.drift).toBeLessThan(0.5)
     const vib = dirtOf(tone(220, sawAmps(220), 2, { cents: (t) => 25 * Math.sin(2 * Math.PI * 5 * t) }))
     expect(vib.drift).toBeLessThan(1.5)
@@ -187,6 +187,16 @@ describe('dirt', () => {
     expect(d.detune).not.toBeNull()
     expect(d.detune!.cents).toBeGreaterThan(4.5)
     expect(d.detune!.cents).toBeLessThan(7.5)
+  })
+
+  it('hears a string ensemble as chorus, not as drift or detune', () => {
+    const d = dirtOf(ensemble(130.81, sawAmps(130.81), 3, 1))
+    expect(d.chorus).not.toBeNull()
+    expect(d.chorus!.cents).toBeGreaterThan(2)
+    expect(d.chorus!.beat).toBeGreaterThan(2)
+    expect(d.detune).toBeNull()
+    // One voice, its pitch wandering: drift, no chorus.
+    expect(dirtOf(tone(130.81, sawAmps(130.81), 3, { cents: (t) => 6 * Math.sin(2 * Math.PI * 0.7 * t) + 3 * Math.sin(2 * Math.PI * 2.3 * t) })).chorus).toBeNull()
   })
 
   it('follows a pitch that wanders', () => {

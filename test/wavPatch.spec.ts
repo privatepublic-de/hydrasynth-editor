@@ -11,7 +11,7 @@ import { harmonicAmps, harmonicLevels } from '../src/ui/waveSpeech'
 import { FM_CALIBRATION } from '../src/ui/fmModel'
 import { destinationOf } from '../src/ui/modDestinations'
 import { buildWavPatch, CALIBRATION, distance, fitFm, fitWave, wavStatus } from '../src/ui/wavPatch'
-import { noise, RATE, sawAmps, tone } from './signals'
+import { ensemble, noise, RATE, sawAmps, tone } from './signals'
 
 const data = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8'))
 const cycles: (Float32Array | null)[] = data.waves.map((w: { cycle: string } | null) => w && decodeCycle(w.cycle))
@@ -213,7 +213,7 @@ describe('buildWavPatch', () => {
     const mix = (...parts: Float32Array[]) => parts[0].map((_, i) => parts.reduce((sum, q) => sum + q[i], 0))
     const f0 = 220
     const clean = buildWavPatch(analyse({ samples: tone(f0, sawAmps(f0), 2), sampleRate: RATE }), { levels })
-    expect(clean.dirt).toEqual({ noise: null, drift: null, detune: null })
+    expect(clean.dirt).toEqual({ noise: null, drift: null, detune: null, ensemble: false })
     expect(clean.patch.get('mixernoisevol')).toBe(0)
 
     const noisy = buildWavPatch(analyse({ samples: mix(tone(f0, sawAmps(f0), 2), noise(2).map((v) => v * 0.25)), sampleRate: RATE }), { levels })
@@ -228,6 +228,14 @@ describe('buildWavPatch', () => {
     expect(show(twin.patch, 'osc3type')).toBe(show(twin.patch, 'osc1type'))
     expect(twin.patch.get('osc3cent')).toBe(-twin.patch.get('osc1cent'))
     expect(twin.patch.get('mixerosc3vol')).toBeGreaterThan(512)
+
+    const strings = buildWavPatch(analyse({ samples: ensemble(130.81, sawAmps(130.81), 3, 1), sampleRate: RATE }), { levels })
+    expect(strings.dirt.ensemble).toBe(true)
+    expect(show(strings.patch, 'prefxtype')).toBe('Chorus')
+    expect(show(strings.patch, 'postfxtype')).toBe('Chorus')
+    expect(labelNumber(show(strings.patch, 'prefx1param1'))).toBeCloseTo(0.6, 1)
+    expect(strings.dirt.drift).toBeNull()
+    expect(wavStatus(strings)).toContain('ensemble')
 
     let seed = 1
     const walk = Array.from({ length: 60 }, () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 12)

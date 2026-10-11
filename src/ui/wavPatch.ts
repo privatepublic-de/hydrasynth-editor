@@ -18,7 +18,8 @@
 //   LFO 2      tremolo found in the note (the Amp's own LFO 2 Amount)
 //   Dirt       as recorded (src/audio/dirt.ts): noise between the harmonics on the noise source in
 //              the nearest colour, past Filter 1; a pitch that wanders on a Random LFO 3 (route 6, All Osc Pitch);
-//              a second voice some cents off on OSC 3, the same wave, OSC 1 as far the other way
+//              a second voice some cents off on OSC 3, the same wave, OSC 1 as far the other way;
+//              a string machine's ensemble on the two FX: a Chorus at 0.6 Hz before, one at 6 Hz after
 //   Macros     1 Bright (Filt 1 Cutoff), 2 Timbre (FM Depth, WaveScan, or Resonance on one wave),
 //              3 Attack and 4 Release (ENV 2), Movement (how far ENV 1 or 3 moves things) and Dirt
 //              (Filter 1 Drive, from none: a recording's saturation is in its harmonics already), each
@@ -83,6 +84,19 @@ export const CALIBRATION = {
   ],
   /** The noise into Filter 2 (Noise filter ratio 0:100), open in Series: past Filter 1's cutoff (noiseroute: at Cutoff 384 -12.4 dB as open, against -29.2 through it). */
   noiseRoute: 1024,
+  /**
+   * A string machine's two sweeps on the FX: Pre-FX Chorus at 0.6 Hz and Post-FX Chorus at 6 Hz at
+   * half the depth, both Feedback 0 and the same wet; what src/audio/dirt.ts reads of each (ensemble,
+   * two takes each; recordings read 5-13 cents, beating 5-6 dB).
+   */
+  ensemble: [
+    { depth: 512, wet: 512, cents: 3.4 },
+    { depth: 512, wet: 640, cents: 5.6 },
+    { depth: 512, wet: 768, cents: 7.8 },
+    { depth: 768, wet: 768, cents: 10.8 },
+    { depth: 512, wet: 896, cents: 14.5 },
+    { depth: 768, wet: 896, cents: 18.5 },
+  ],
   /** A Random LFO (1.5 Hz, Smooth 127) on All Osc Pitch: cents of drift per route depth (drift: 4.9 at 4, 8.9 at 8; Analog Feel drifts none within a note). */
   driftCentsPerDepth: 1.15,
   /** The Voice's own vibrato only plays with the Mod Wheel up: cents to either side per Amount raw (vibrato: 0.5 47, 2.0 186). */
@@ -129,7 +143,7 @@ export interface WavPatch {
   /** The waves played, in WaveScan order (one: no WaveScan; none with FM). */
   waves: number[]
   /** What of the recording's dirt the patch plays: its noise's colour, drift and detune (cents). */
-  dirt: { noise: string | null; drift: number | null; detune: number | null }
+  dirt: { noise: string | null; drift: number | null; detune: number | null; ensemble: boolean }
   /** OSC 2 plays a Sine under the wave. */
   sub: boolean
   /** Mutant FM instead: its Ratio, Depth (raw) and whether ENV 3 moves the Depth. */
@@ -451,8 +465,10 @@ export function buildWavPatch(
   const adsr = ENVELOPES.find((e) => e.value === envelope)?.adsr ?? a.adsr
   setEnvelope(p, 2, adsr, true)
 
-  const vibrato = wobble ? a.vibrato : null
-  const tremolo = wobble ? a.tremolo : null
+  // An ensemble's fast sweep reads as vibrato and its beating as tremolo: its choruses play both.
+  const ensemble = dirt && !!a.dirt.chorus && !a.warnings.includes('inharmonic or noisy')
+  const vibrato = wobble && !ensemble ? a.vibrato : null
+  const tremolo = wobble && !ensemble ? a.tremolo : null
   p.set('voicevibratoamount', 0)
   if (vibrato) {
     p.set('lfo1wave', 0) // Sine
@@ -477,9 +493,9 @@ export function buildWavPatch(
   }
 
   // Dirt, as recorded, where it's clearly more than a clean synth recording shows.
-  const added: WavPatch['dirt'] = { noise: null, drift: null, detune: null }
+  const added: WavPatch['dirt'] = { noise: null, drift: null, detune: null, ensemble: false }
   if (dirt) {
-    const { noise, drift, detune, ensemble } = a.dirt
+    const { noise, drift, detune, chorus } = a.dirt
     // Not on inharmonic sounds: what lies between their harmonics is partials, not noise.
     if (noise && noise.db >= DIRT.noiseDb && !a.warnings.includes('inharmonic or noisy')) {
       // The colour nearest its slope, at the level that puts it as far under the harmonics.
@@ -499,9 +515,21 @@ export function buildWavPatch(
       p.set('mixerosc3vol', clamp(Math.round(1024 * Math.sqrt(detuneLevel(detune.depth)))))
       added.detune = 2 * Math.round(half)
     }
+    // An ensemble: the FX's two choruses, as wet as reads nearest the recording's wobble.
+    if (chorus && ensemble) {
+      const fx = CALIBRATION.ensemble.reduce((x, e) => (Math.abs(e.cents - chorus.cents) < Math.abs(x.cents - chorus.cents) ? e : x))
+      for (const [side, rate, depth] of [['pre', 0.6, fx.depth], ['post', 6, fx.depth / 2]] as const) {
+        p.set(`${side}fxtype`, 1) // Chorus
+        p.set(`${side}fx1param1`, rawFor(`${side}fx1param1`, rate))
+        p.set(`${side}fx1param2`, depth)
+        p.set(`${side}fx1param4`, 64) // Feedback 0
+        p.set(`${side}fxwet`, fx.wet)
+      }
+      added.ensemble = true
+    }
     // A pitch that wanders: not where a second voice, a chorus or inharmonic partials make it look
     // so, nor past a few cents (a chorus's wobble, not an oscillator's drift).
-    if (drift >= DIRT.driftCents && drift <= DIRT.driftMaxCents && !added.detune && !ensemble && !a.warnings.includes('inharmonic or noisy')) {
+    if (drift >= DIRT.driftCents && drift <= DIRT.driftMaxCents && !added.detune && !chorus && !a.warnings.includes('inharmonic or noisy')) {
       p.set('lfo3wave', 9) // Random
       p.set('lfo3bpmsync', 0)
       p.set('lfo3ratesyncoff', rawFor('lfo3ratesyncoff', 1.5))
@@ -609,6 +637,7 @@ export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 
     : [`${scan.join(' → ')}${w.waves.length > 1 ? ' by WaveScan' : ''}${w.sub ? ' over a Sine' : ''}`]
   if (w.filterEnvelope) parts.push('filter envelope')
   if (w.dirt.detune) parts.push(`OSC 3 ${w.dirt.detune} cents apart`)
+  if (w.dirt.ensemble) parts.push('ensemble')
   if (w.dirt.drift) parts.push('drifting')
   if (w.dirt.noise) parts.push(`${w.dirt.noise.toLowerCase()} noise`)
   parts.push(w.vibrato ? `vibrato ${w.vibrato.rateHz.toFixed(1)} Hz` : 'vibrato on the Mod Wheel')

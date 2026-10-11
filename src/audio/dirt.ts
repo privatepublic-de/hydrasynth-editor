@@ -1,6 +1,6 @@
 // What makes a recorded note less clean than a synth's waves played still: its pitch wandering
 // (drift), a second oscillator a few cents off (detune: harmonic k beats at k times the offset),
-// chorus or an ensemble (every harmonic beating at about one rate), and noise between the
+// chorus or an ensemble (each harmonic's frequency wobbling its own way), and noise between the
 // harmonics. Read on the steady part of the note, so a filter sweep, a decay or vibrato isn't
 // taken for any of them.
 import { fft } from './fft'
@@ -10,8 +10,11 @@ export interface Dirt {
   drift: number
   /** A second voice `cents` off, beating `depth` dB (RMS) at harmonic k by k times that. */
   detune: { cents: number; depth: number } | null
-  /** Harmonics beating at about one rate whatever their number: chorus, an ensemble. */
-  ensemble: { rateHz: number; depth: number } | null
+  /**
+   * Chorus, an ensemble: each harmonic's frequency wobbling its own way (`cents`, the typical
+   * departure from what they do together), at about `rateHz`, the levels beating `beat` dB RMS.
+   */
+  chorus: { cents: number; rateHz: number | null; beat: number } | null
   /** Noise between the harmonics: dB under them, and its slope (dB per octave: white 0, pink -3). */
   noise: { db: number; slope: number } | null
 }
@@ -40,6 +43,12 @@ function phasor(x: Float32Array, sampleRate: number, hz: number, from: number, n
 }
 
 const HOP_S = 0.01
+/**
+ * Chorus from this much wobble of the harmonics apart (cents; clean notes read under 1), and their
+ * levels beating this much (dB; string machines 5-6, a DX marimba's FM 0.3 at 3.5 cents).
+ */
+const CHORUS = { cents: 2, beat: 2 }
+const median = (v: number[]) => (v.length ? [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)] : NaN)
 const rms = (v: number[]) => Math.sqrt(v.reduce((s, a) => s + a * a, 0) / Math.max(1, v.length))
 
 /** `v` (one value per HOP_S) less its least-squares polynomial of `order` (1: a line, 2: a curve). */
@@ -154,56 +163,71 @@ export function measureDirt(x: Float32Array, sampleRate: number, f0: number, amp
   const starts: number[] = []
   for (let t = from; t < to; t += hop) starts.push(t)
 
-  // Drift: the frequency of the loudest of the first six harmonics, from how its phase advances
-  // hop to hop (a change of timbre moves its level, not its frequency).
-  const k = 1 + amps.slice(0, 6).indexOf(Math.max(...amps.slice(0, 6)))
-  const hz = k * f0
-  const expected = (2 * Math.PI * hz * hop) / sampleRate
-  const track: number[] = []
-  let prev: [number, number] | null = null
-  let top = 0
-  const frames = starts.map((t) => phasor(x, sampleRate, hz, t, window))
-  for (const [re, im] of frames) top = Math.max(top, Math.hypot(re, im))
-  for (const [re, im] of frames) {
-    if (Math.hypot(re, im) < top * 0.03) break // 30 dB down: too faint to follow
-    if (prev) {
-      let d = Math.atan2(im * prev[0] - re * prev[1], re * prev[0] + im * prev[1]) - expected
+  // Each of the first eight harmonics (to 5 kHz), hop by hop: its level, and its frequency from
+  // how its phase advances (a change of timbre moves its level, not its frequency).
+  const peak = Math.max(...amps)
+  const harmonics: { k: number; levels: number[]; cents: number[] }[] = []
+  for (let k = 1; k <= 8 && k * f0 < 5000; k++) {
+    if ((amps[k - 1] ?? 0) < peak * 0.03) continue // 30 dB under the loudest: too faint to follow
+    const hz = k * f0
+    const expected = (2 * Math.PI * hz * hop) / sampleRate
+    const frames = starts.map((t) => phasor(x, sampleRate, hz, t, window))
+    const level = frames.map(([re, im]) => Math.hypot(re, im))
+    const loudest = Math.max(...level)
+    const cents = frames.map(([re, im], i) => {
+      // Not near a null (two voices cancelling): there its phase means nothing.
+      if (i === 0 || level[i] < loudest * 0.1 || level[i - 1] < loudest * 0.1) return NaN
+      const [pr, pi] = frames[i - 1]
+      let d = Math.atan2(im * pr - re * pi, re * pr + im * pi) - expected
       d -= 2 * Math.PI * Math.round(d / (2 * Math.PI))
-      track.push(1200 * Math.log2(1 + (d * sampleRate) / (2 * Math.PI * hop) / hz))
-    }
-    prev = [re, im]
+      return 1200 * Math.log2(1 + (d * sampleRate) / (2 * Math.PI * hop) / hz)
+    })
+    harmonics.push({ k, levels: level.map((v) => 20 * Math.log10(v + 1e-9)), cents })
   }
-  const pitch = track.length >= 20 ? detrend(vibratoHz ? withoutSine(track, vibratoHz) : track, 1) : []
+
+  // Drift: what the harmonics' frequencies do together (their median, hop by hop).
+  const common = starts.map((_, i) => median(harmonics.map((h) => h.cents[i]).filter(Number.isFinite)))
+  const followed = common.slice(1).filter(Number.isFinite)
+  const pitch = followed.length >= 20 ? detrend(vibratoHz ? withoutSine(followed, vibratoHz) : followed, 1) : []
   const drift = rms(pitch)
+
+  // Chorus: what each harmonic's frequency does on its own, away from the others. Copies of the
+  // note on delays that move apart wobble each harmonic its own way; one voice moves them as one.
+  const own = harmonics.map((h) => h.cents.map((c, i) => c - common[i]))
+  const spreads = own.map((e) => {
+    const v = e.filter(Number.isFinite)
+    return v.length >= 20 ? 1.4826 * median(v.map(Math.abs)) : NaN
+  })
+  const spread = median(spreads.filter(Number.isFinite))
+  const chorusRate = median(own.map((e) => repeatRate(e.map((v) => (Number.isFinite(v) ? v : 0)))).filter((r): r is number => r !== null))
 
   // Beating: each harmonic's level (dB), its slow course (a decay, a sweep) taken out.
   const rates: { k: number; rate: number; depth: number; wobble: number[] }[] = []
-  for (let h = 1; h <= 8 && h * f0 < 5000; h++) {
-    const levels = starts.map((t) => 20 * Math.log10(Math.hypot(...phasor(x, sampleRate, h * f0, t, window)) + 1e-9))
-    if (levels.length < 50 || Math.max(...levels) < 20 * Math.log10(Math.max(...amps)) - 40) continue
+  for (const { k, levels } of harmonics) {
+    if (levels.length < 50) continue
     const wobble = detrend(levels, 2)
     const depth = rms(wobble)
     const rate = repeatRate(wobble)
     // Two beats in the stretch at least (repeatRate sees to that), fast enough not to be a sweep's leftover.
-    if (rate !== null && depth >= 0.4 && rate >= 0.3) rates.push({ k: h, rate, depth, wobble })
+    if (rate !== null && depth >= 0.4 && rate >= 0.3) rates.push({ k, rate, depth, wobble })
   }
+  // Chorus: each harmonic's frequency wobbling its own way, the levels beating too (copies of the
+  // note on moving delays meet and part). Its beats quicken with the harmonic as a detune's do, but
+  // a fixed detune leaves each harmonic's frequency still between them.
+  const beat = median(harmonics.filter((h) => h.levels.length >= 50).map((h) => rms(detrend(h.levels, 2))))
+  const chorus =
+    harmonics.length >= 3 && spread >= CHORUS.cents && beat >= CHORUS.beat ? { cents: spread, rateHz: Number.isFinite(chorusRate) ? chorusRate : null, beat } : null
   let detune: Dirt['detune'] = null
-  let ensemble: Dirt['ensemble'] = null
-  // Tremolo moves every harmonic together; voices apart or a chorus move each its own way.
+  // Tremolo moves every harmonic together; voices apart move each its own way.
   const together = meanCorrelation(rates.map((r) => r.wobble))
-  if (rates.length >= 3 && together < 0.6) {
-    const med = (v: number[]) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)]
-    const offset = med(rates.map((r) => r.rate / r.k))
+  if (!chorus && rates.length >= 3 && together < 0.6) {
+    const offset = median(rates.map((r) => r.rate / r.k))
     const scaling = rates.filter((r) => Math.abs(r.rate / r.k - offset) <= 0.35 * offset).length / rates.length
-    const rate = med(rates.map((r) => r.rate))
-    const same = rates.filter((r) => Math.abs(r.rate - rate) <= 0.35 * rate).length / rates.length
-    const depth = med(rates.map((r) => r.depth))
-    // Harmonics beating faster the higher they are: two voices apart; at one rate: a chorus.
-    if (scaling >= 0.6 && scaling > same) detune = { cents: 1200 * Math.log2(1 + offset / f0), depth }
-    else if (same >= 0.6) ensemble = { rateHz: rate, depth }
+    // Harmonics beating faster the higher they are: two voices apart.
+    if (scaling >= 0.6) detune = { cents: 1200 * Math.log2(1 + offset / f0), depth: median(rates.map((r) => r.depth)) }
   }
 
-  return { drift, detune, ensemble, noise: noiseBetween(x, sampleRate, f0, from, to) }
+  return { drift, detune, chorus, noise: noiseBetween(x, sampleRate, f0, from, to) }
 }
 
 /**

@@ -117,10 +117,10 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
       </label>
       <label
         className="speech-dialog__field"
-        title="Noise between the harmonics (the noise source), a second voice some cents off (OSC 3) and a pitch that wanders (a Random LFO 3), where the recording has more of them than a clean synth. Distortion is on the Dirt macro."
+        title="Noise between the harmonics (the noise source), a second voice some cents off (OSC 3), a string machine's ensemble (two Choruses on the FX) and a pitch that wanders (a Random LFO 3), where the recording has more of them than a clean synth. Distortion is on the Dirt macro."
       >
         <input type="checkbox" checked={choices.dirt} onChange={(e) => choose({ dirt: e.target.checked })} />
-        Drift, detune and noise as recorded
+        Drift, detune, ensemble and noise as recorded
       </label>
       <p className="speech-dialog__said wav-dialog__said">{status}</p>
       {result && (

@@ -79,3 +79,21 @@ export function wavBytes(x: Float32Array, { rate = RATE, bits = 16, float = fals
     }
   return new Uint8Array(buf)
 }
+
+/**
+ * A string ensemble: three copies of a note of `amps` at `f0`, each on a delay moving at 0.6 Hz
+ * and 6 Hz, a third of a turn apart (as the Solina's and VP-330's bucket brigades): `ms` the slow
+ * sweep, a fifth of that the fast.
+ */
+export function ensemble(f0: number, amps: number[], seconds: number, ms = 0.6, rate = RATE): Float32Array {
+  return Float32Array.from({ length: Math.round(seconds * rate) }, (_, i) => {
+    const t = i / rate
+    let v = 0
+    for (let c = 0; c < 3; c++) {
+      const turn = (2 * Math.PI * c) / 3
+      const delay = 0.004 + (ms / 1000) * Math.sin(2 * Math.PI * 0.6 * t + turn) + (ms / 5000) * Math.sin(2 * Math.PI * 6 * t + turn)
+      amps.forEach((a, k) => (v += (a / 3) * Math.sin((k + 1) * 2 * Math.PI * f0 * (t - delay))))
+    }
+    return v
+  })
+}

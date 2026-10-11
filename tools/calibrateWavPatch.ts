@@ -21,6 +21,11 @@
 //              Noise Vol 128..32 and each Noise Type (level under the Saw, slope), Pre-FX Chorus at
 //              rates and depths (ensemble), OSC 3 a Saw some cents up at two volumes (detune)
 //   drift      a Random LFO 3 (1.5 Hz, Smooth 127) on All Osc Pitch and Osc 1 Pitch at route depths 4..16, on a Saw at C3: drift (cents)
+//   chorus     Pre-FX Chorus on a Saw at C3, at rates 0.5..6 Hz, depths 16..64 and wet 50/100 %: what
+//              src/audio/dirt.ts reads (cents apart, rate, beating); a single chorus reads unevenly
+//   ensemble   Pre-FX Chorus at 0.6 Hz and Post-FX Chorus at 6 Hz (half the depth), as a string
+//              machine's two sweeps, at depths 64/96 and wet 50..87 %: the table src/ui/wavPatch.ts
+//              matches a recording's chorus against
 //   tremolo    a Sine LFO 2 at 4 Hz through Amp LFO 2 Amount +16: dB to either side
 // Usage: npx vite-node tools/calibrateWavPatch.ts <experiment>
 import { analyse } from '../src/audio/analyse'
@@ -270,7 +275,7 @@ async function main() {
       const note = 48
       const read = async (p: Patch, hold = 2.5) => analyse({ samples: f32(await synth.take(p, note, hold)), sampleRate: RATE }).dirt
       const fmt = (d: Awaited<ReturnType<typeof read>>) =>
-        `drift ${d.drift.toFixed(1)} c, detune ${d.detune ? `${d.detune.cents.toFixed(1)} c ${d.detune.depth.toFixed(1)} dB` : '-'}, ensemble ${d.ensemble ? `${d.ensemble.rateHz.toFixed(1)} Hz ${d.ensemble.depth.toFixed(1)} dB` : '-'}, noise ${d.noise ? `${d.noise.db.toFixed(1)} dB ${d.noise.slope.toFixed(1)}/oct` : '-'}`
+        `drift ${d.drift.toFixed(1)} c, detune ${d.detune ? `${d.detune.cents.toFixed(1)} c ${d.detune.depth.toFixed(1)} dB` : '-'}, chorus ${d.chorus ? `${d.chorus.cents.toFixed(1)} c ${d.chorus.rateHz?.toFixed(1) ?? '?'} Hz beat ${d.chorus.beat.toFixed(1)} dB` : '-'}, noise ${d.noise ? `${d.noise.db.toFixed(1)} dB ${d.noise.slope.toFixed(1)}/oct` : '-'}`
       for (const feel of [0, 32, 64, 127]) {
         const p = sawPatch()
         p.set('voiceanalogfeel', feel)
@@ -316,6 +321,43 @@ async function main() {
         const d = analyse({ samples: f32(await synth.take(p, 48, 3)), sampleRate: RATE }).dirt
         console.log(`${show('modmatrix1modtarget', target)} at depth ${quarter / 4}: drift ${d.drift.toFixed(1)} c`)
       }
+    } else if (experiment === 'chorus') {
+      const rows: string[] = []
+      for (const wet of [512, 1024])
+        for (const depth of [128, 256, 512])
+          for (const rate of [0.5, 1.5, 3, 6]) {
+            const p = sawPatch()
+            p.set('prefxtype', 1) // Chorus
+            p.set('prefx1param1', rawFor('prefx1param1', rate))
+            p.set('prefx1param2', depth)
+            p.set('prefx1param4', 64) // Feedback 0
+            p.set('prefxwet', wet)
+            const d = analyse({ samples: f32(await synth.take(p, 48, 3)), sampleRate: RATE }).dirt
+            const c = d.chorus
+            const row = `{ rate: ${rate}, depth: ${depth}, wet: ${wet}, cents: ${c ? c.cents.toFixed(1) : 0}, beat: ${c ? c.beat.toFixed(1) : 0}, read: ${c?.rateHz?.toFixed(1) ?? 'null'} }, // drift ${d.drift.toFixed(1)}`
+            console.log(row)
+            rows.push(row)
+          }
+    } else if (experiment === 'ensemble') {
+      for (const depth of [512, 768])
+        for (const wet of [512, 640, 768, 896]) {
+          const p = sawPatch()
+          p.set('prefxtype', 1) // Chorus
+          p.set('prefx1param1', rawFor('prefx1param1', 0.6))
+          p.set('prefx1param2', depth)
+          p.set('prefx1param4', 64) // Feedback 0
+          p.set('prefxwet', wet)
+          p.set('postfxtype', 1)
+          p.set('postfx1param1', rawFor('postfx1param1', 6))
+          p.set('postfx1param2', depth / 2)
+          p.set('postfx1param4', 64)
+          p.set('postfxwet', wet)
+          for (let take = 0; take < 2; take++) {
+            const d = analyse({ samples: f32(await synth.take(p, 48, 3)), sampleRate: RATE }).dirt
+            const c = d.chorus
+            console.log(`{ depth: ${depth}, wet: ${wet}, cents: ${c ? c.cents.toFixed(1) : 0}, beat: ${c ? c.beat.toFixed(1) : 0} }, // detune ${d.detune ? d.detune.cents.toFixed(1) : '-'}, drift ${d.drift.toFixed(1)}`)
+          }
+        }
     } else if (experiment === 'tremolo') {
       for (const amount of [576, 640, 768, 1024]) {
         const p = sawPatch()
