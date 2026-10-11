@@ -50,6 +50,37 @@ Best with one note, dry, at least a quarter second long, from about 20 Hz to 2 k
 line under the choices says what the patch is made of and the note to play, and when the
 recording isn't one clear note (a rough start).
 
+## A patch that speaks
+
+The patch bar's menu (☰) → Generate speech patch… replaces the patch with one that says a few
+English words (up to 60 characters) on every note, the way a formant synthesiser does: a voice
+through Filter 1's Vowel filter and noise through Filter 2 for breath and hiss, run by five
+one-shot Step LFOs that the note starts (vowel, voicing, hiss, hiss colour, melody). Words come
+from the CMU Pronouncing Dictionary, others from spelling rules. The end mark sets the melody:
+a statement or "!" peaks on its main stress and falls, a yes/no "?" rises, a question starting
+with a question word ("how", "what", …) falls.
+
+- **Voice:** a Saw with melody; one of the synth's waves for the whole phrase, with melody; a
+  wave per sound (its pitch only falls or rises over the phrase); or a wave per sound without the
+  Vowel filter. The waves are picked for harmonics that already show each sound's formants at
+  the note they're tuned for (C2, C3 or C4): clearest near that note.
+- **Speed:** slow, normal or fast; Macro 1 changes it later.
+- **Sing:** Mono, and the keys give the pitch. Played legato the phrase goes on at the new note;
+  let go, and the next note starts it again.
+- **Macros:** Speed, Fundamental (a Saw at the played note, for melodic speech and chords),
+  Voice (smaller or larger, through Formant Control; not without the Vowel filter), Whisper
+  (breath instead of voice) and Freeze (also on the Mod Wheel: stops on the current sound, to
+  sing on it).
+
+The status line says how long to hold a note and the sounds it makes, e.g. "Hold a note 1.3 s:
+h ah l ow uw · w er l d". A phrase with more sounds than the Step LFOs have steps loses its
+end ("2 sounds left out"). Connected to the synth, generating replaces the patch with no undo,
+so write what you want to keep first.
+
+The wavelist does a smaller version: on an oscillator page in WaveScan mode, choose Speech in
+the wavelist's fill menu and click Fill. It puts eight waves in the wavelist that say the
+words, talk-box style, as WaveScan sweeps from 1 to 8.
+
 ## Publishing
 
 Every push to `main` runs the tests, builds the editor and publishes `dist/` with GitHub
