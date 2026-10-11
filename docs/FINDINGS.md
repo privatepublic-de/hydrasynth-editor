@@ -54,7 +54,8 @@ so both agree.
 - **Macro names:** stored with 16 characters, but the Desktop shows 8 (A5's "FiltAtckMixer"
   reads "FiltAtck"). The editor shows and edits 8; longer stored names are kept unless edited.
 - **Arp tempo:** with System "Tempo Lock" on and the clock source USB, the synth keeps its own
-  tempo whatever the patch says.
+  tempo whatever the patch says. The Arpeggiator page says so under its knobs; it can't tell
+  when, since system settings can't be read over MIDI.
 - **Displays checked against the screen:** A38's and A34's FX (EQ gains, crossovers, Dry/Wet),
   Reverb Time (0 = 120 ms, 128 = 400 ms, 161 = 480 ms, as Edisyn's table), Delay Time (424 =
   250 ms), and live edits (filter cutoff by NRPN, FX params by NRPN, a BPM sync switch, a
@@ -93,5 +94,3 @@ so both agree.
 - **Mutant mode switches:** does the synth keep the other mode's values apart too, as for BPM
   sync, or load defaults? The editor assumes the former; a mode not used since loading starts
   at its minimums.
-- **Arp tempo hint:** with Tempo Lock on, the editor could say next to the tempo that the
-  synth ignores it, instead of looking broken. Not done yet.

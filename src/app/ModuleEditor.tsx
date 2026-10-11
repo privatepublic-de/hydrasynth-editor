@@ -50,7 +50,7 @@ function visibleKey(slot: Slot, patch: Patch): string | null {
   return key !== null && isShown(key, patch) ? key : null
 }
 
-function PageView({ title, slots }: { title: string; slots: Slot[] }) {
+function PageView({ title, slots, note }: { title: string; slots: Slot[]; note?: string }) {
   const patch = useEditor((s) => s.sync?.patch)
   useEditor((s) => s.sync?.revision)
   if (!patch) return null
@@ -71,6 +71,7 @@ function PageView({ title, slots }: { title: string; slots: Slot[] }) {
           ),
         )}
       </div>
+      {note && <p className="page__note">{note}</p>}
     </section>
   )
 }
@@ -258,7 +259,7 @@ export function ModuleEditor() {
         <ModuleDisplay module={module.id} />
         {blocks(module.pages).map((b, i) =>
           b.kind === 'page' ? (
-            <PageView key={`${id}-${i}`} title={b.page.title} slots={b.page.slots} />
+            <PageView key={`${id}-${i}`} title={b.page.title} slots={b.page.slots} note={b.page.note} />
           ) : (
             <TableView key={`${id}-${i}`} title={b.title} rows={b.rows} />
           ),

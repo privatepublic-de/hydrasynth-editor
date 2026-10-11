@@ -18,6 +18,8 @@ export interface Page {
    * are best drawn as one grid (rows = pages, columns = slot positions), not as knob pages.
    */
   table?: string
+  /** A line under the page's knobs, for what the synth does with them that the editor can't show. */
+  note?: string
 }
 
 export interface ModuleLayout {
@@ -290,7 +292,12 @@ const arp: ModuleLayout = {
   id: 'arp',
   label: 'ARPEGGIATOR',
   pages: [
-    { title: 'Arp', slots: ['arptempo', 'arpdivision', 'arpswing', 'arpgate', 'arpoctmode', 'arpoctave', 'arpmode', 'arplength'] },
+    {
+      title: 'Arp',
+      slots: ['arptempo', 'arpdivision', 'arpswing', 'arpgate', 'arpoctmode', 'arpoctave', 'arpmode', 'arplength'],
+      // System settings can't be read over MIDI, so this can't depend on them (docs/FINDINGS.md).
+      note: 'Tempo: the synth keeps its own tempo while Tempo Lock is on in its System Setup, and follows the clock while it syncs to an external one.',
+    },
     { title: 'Arp 2', slots: ['arptaptrig', 'arpphrase', 'arpratchet', 'arpchance', 'arpclklock', null, null, 'arpstepoffset'] },
     // Not on the Arp Edit pages: the arp section's own ON and LATCH buttons.
     { title: 'More', slots: ['arpenable', 'arplatch'] },
