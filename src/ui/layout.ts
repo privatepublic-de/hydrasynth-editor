@@ -324,7 +324,7 @@ const modMatrix: ModuleLayout = {
   pages: range(32).map((r) => ({
     title: `Route ${r}`,
     slots: [`modmatrix${r}modsource`, `modmatrix${r}modtarget`, `modmatrix${r}depth`],
-    table: 'Mod Matrix',
+    table: 'Mod matrix',
   })),
 }
 
