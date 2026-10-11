@@ -29,13 +29,20 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
     return (
       <div className="write-dialog error-page" role="alert">
         <h2>Something went wrong</h2>
-        <p>The editor ran into an error it can&rsquo;t recover from: {error.message}</p>
+        <p>The editor ran into an error it can&rsquo;t recover from.</p>
         {sync?.patch && (
           <p>
             {sync.dirty ? 'The patch has changes that aren’t written to the synth yet. ' : ''}
             Save it as a file before reloading; Restore puts it back.
           </p>
         )}
+        <details>
+          <summary>Error details</summary>
+          {/* Chrome's stack starts with the message, Firefox's doesn't. */}
+          <pre className="about-dialog__text">
+            {error.stack?.includes(error.message) ? error.stack : `${error.message}\n${error.stack ?? ''}`}
+          </pre>
+        </details>
         <div className="write-dialog__actions">
           {sync?.patch && (
             <button type="button" className="function-button" onClick={this.savePatch}>
