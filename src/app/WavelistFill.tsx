@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { WAVE_FEATURES } from '../ui/waveFeatures.generated'
 import { FILL_STYLES, fillWavelist, type FillStyle } from '../ui/wavePopulate'
 import { loadPronunciations, PITCHES, speakWavelist, SILENCE, waveLevels } from '../ui/waveSpeech'
-import { SpeechPatchDialog } from './SpeechPatchDialog'
+import { SpeechPatchDialog, speechStatus } from './SpeechPatchDialog'
 import { useEditor } from './store'
 
 const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8]
@@ -38,7 +38,7 @@ export function WavelistFill({ osc }: { osc: number }) {
     const speech = speakWavelist(text, measured, PITCHES[pitch].hz, await loadPronunciations())
     if (!speech) return setSaid('Nothing to say')
     write(`Speak “${text.trim()}” on OSC ${osc}`, speech.waves)
-    setSaid(speech.sounds.map((s) => s || '·').join(' ') + (speech.dropped ? ` (${speech.dropped} sounds left out)` : ''))
+    setSaid(speechStatus('Sweep WaveScan from 1 to 8', speech))
   }
   const description = style === SPEECH ? SPEECH_DESCRIPTION : FILL_STYLES.find((s) => s.id === style)?.description
 
