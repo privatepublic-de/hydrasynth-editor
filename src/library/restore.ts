@@ -129,6 +129,11 @@ export async function runRestore({
   const filled: Record<string, string[]> = {}
   for (const [i, it] of items.entries()) {
     onProgress({ phase: 'verifying', done: i, total })
+    // Stopped (the port went away): the rest is unchecked, not wrong.
+    if (signal?.aborted) {
+      mismatches.push(...items.slice(i).map((x) => `${slotLabel(x.bank, x.patch)} (not checked)`))
+      break
+    }
     try {
       const back = await session.downloadPatch(it.bank, it.patch)
       const sent = normalizePatch(it.bytes)

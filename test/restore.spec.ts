@@ -120,6 +120,23 @@ describe('runRestore', () => {
     expect(nameIn(synth.slots.get('4:0'))).toBe('New 1') // not reverted
   })
 
+  it('stops checking once stopped after the flash write, and says what went unchecked', async () => {
+    const synth = new FakeHydrasynth()
+    const controller = new AbortController()
+    const result = await settle(
+      runRestore({
+        session: new HydrasynthSession(synth),
+        items: bankOf(2, 'New '),
+        signal: controller.signal,
+        onProgress: (p) => p.phase === 'verifying' && p.done === 3 && controller.abort(),
+      }),
+    )
+    expect(result.outcome).toBe('restored')
+    expect(synth.flashWrites.length).toBeGreaterThan(0)
+    expect(result.mismatches).toHaveLength(125)
+    expect(result.mismatches[0]).toMatch(/not checked/)
+  })
+
   it('reports slots that read back different', async () => {
     // Stores what it's sent, then (once, at the flash) gets one byte wrong.
     class Garbling extends FakeHydrasynth {

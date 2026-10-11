@@ -566,6 +566,10 @@ select {
   overflow-wrap: break-word;
 }
 
+.error-page {
+  margin: 48px auto;
+}
+
 .write-dialog::backdrop {
   background: rgba(0, 0, 0, 0.55);
 }

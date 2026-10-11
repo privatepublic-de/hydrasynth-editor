@@ -34,6 +34,23 @@ describe('NrpnQueue', () => {
     expect(sent).toEqual([[0xb0, 99, 0, 0xb0, 98, 100, 0xb0, 6, 0, 0xb0, 38, 3]])
   })
 
+  it('drops what is left when the port throws, so drained() and size settle', async () => {
+    let calls = 0
+    const q = new NrpnQueue({
+      send: () => {
+        if (calls++) throw new Error('port gone')
+      },
+      channel: () => 1,
+      idle: () => Promise.resolve(),
+    })
+    q.push('a', { param: 1, value: 0 })
+    q.push('b', { param: 2, value: 0 })
+    q.push('c', { param: 3, value: 0 })
+    await settle(q.drained())
+    expect(calls).toBe(2)
+    expect(q.size).toBe(0)
+  })
+
   it('sends lead params (modes) before the values queued ahead of them', async () => {
     const { q, sent } = setup(() => new Promise((r) => setTimeout(r, 5)))
     q.push('a', { param: 1, value: 0 })

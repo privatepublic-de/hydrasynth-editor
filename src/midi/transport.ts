@@ -36,7 +36,10 @@ export function webMidiTransport({ input, output }: MidiPortPair): MidiTransport
     for (const l of listeners) l(e.data)
   }
   return {
-    send: (message) => output.send(message),
+    // A port that has gone throws on send; its replies time out instead (the store says it's gone).
+    send: (message) => {
+      if (output.state === 'connected') output.send(message)
+    },
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)

@@ -97,7 +97,8 @@ export function BackupDialog() {
                     className="function-button"
                     onClick={async () => {
                       if (!connected) await connect()
-                      void start(backup.banks)
+                      // A failed reconnect says why in the patch bar; the backup waits for the next try.
+                      if (useEditor.getState().connection.status === 'connected') void start(backup.banks)
                     }}
                   >
                     {connected ? 'Continue' : 'Reconnect and continue'}

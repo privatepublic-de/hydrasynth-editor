@@ -60,7 +60,13 @@ export class NrpnQueue {
       if (!next) break
       const [key, { msg }] = next
       this.pending.delete(key)
-      this.options.send(Uint8Array.from(nrpnBytes(this.options.channel(), msg)))
+      try {
+        this.options.send(Uint8Array.from(nrpnBytes(this.options.channel(), msg)))
+      } catch {
+        // The port is gone: the rest can't go out either, and settled() mustn't wait for it.
+        this.pending.clear()
+        return
+      }
       await sleep(this.gap(key))
     }
   }

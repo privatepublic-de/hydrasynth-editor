@@ -115,9 +115,11 @@ let session: HydrasynthSession | null = null
 let backupHave = new Map<string, StoredPatch>()
 let backupAbort: AbortController | null = null
 let restoreAbort: AbortController | null = null
+/** The patch's revision when the synth's port disappeared; null while connected (or never). */
+let offlineRevision: number | null = null
 
 /** Hands `bytes` to the browser as a file download. */
-function download(bytes: Uint8Array, name: string) {
+export function download(bytes: Uint8Array, name: string) {
   const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }))
   const a = document.createElement('a')
   a.href = url
@@ -306,21 +308,40 @@ export const useEditor = create<EditorState>((set, get) => ({
         set({ connection: { status: 'failed', message: 'No Hydrasynth found. Check the USB cable and that the synth is on.' } })
         return
       }
-      // A reconnect keeps the patch being edited.
-      const previous = patchSync?.get()
+      // A reconnect keeps the patch being edited (after a lost port: as it was edited offline).
+      const previous = patchSync?.get() ?? get().sync
+      const editedOffline = offlineRevision !== null && previous !== null && previous.revision !== offlineRevision
+      offlineRevision = null
       patchSync?.dispose()
       session?.dispose()
       session = new HydrasynthSession(webMidiTransport(ports), { timeoutMs: 3000 })
-      // The synth's USB port can vanish (a long run of dumps did that once): say so, and stop a backup.
+      // The synth's USB port can vanish (a long run of dumps did that once): say so, stop what
+      // runs, and keep editing offline until the next connect.
       access.onstatechange = (e) => {
         const port = (e as MIDIConnectionEvent).port
         if (!port || port.state !== 'disconnected' || (port.id !== ports.input.id && port.id !== ports.output.id)) return
+        if (get().connection.status !== 'connected') return
+        access.onstatechange = null
         backupAbort?.abort()
-        set({ connection: { status: 'failed', message: 'The synth\u2019s USB MIDI port disappeared. Check the cable, then connect again.' } })
+        restoreAbort?.abort()
+        patchSync?.dispose()
+        session?.dispose()
+        patchSync = null
+        session = null
+        // Offline edits keep their own undo history, as in the demo; nothing is in flight any more.
+        demoHistory.reset()
+        const sync = get().sync
+        offlineRevision = sync?.revision ?? null
+        set({
+          connection: { status: 'failed', message: 'The synth\u2019s USB MIDI port disappeared. Check the cable, then connect again.' },
+          sync: sync && { ...sync, busy: null, pendingFullSend: false, undoLabel: null, redoLabel: null },
+        })
       }
       patchSync = new PatchSync({ session, channel: get().channel })
       patchSync.subscribe((s) => set({ sync: s }))
       if (previous) patchSync.adopt(previous)
+      // Edits made while the port was gone never reached the synth: send it the whole patch.
+      if (editedOffline) void patchSync.audition().catch(() => undefined) // the error is in sync.error
       set({ connection: { status: 'connected', port: ports.output.name ?? 'Hydrasynth' }, sync: patchSync.get() })
     } catch (err) {
       set({ connection: { status: 'failed', message: `MIDI access was refused or failed: ${(err as Error).message}` } })
