@@ -33,7 +33,7 @@ describe('spellSounds', () => {
 })
 
 describe('speakWavelist', () => {
-  it('gives eight slots, never Silence in slot 1, nothing for no words', () => {
+  it('gives eight positions, never Silence in position 1, nothing for no words', () => {
     for (const text of ['hello world', 'yes', 'a', 'thank you very much', 'daisy daisy give me your answer do']) {
       const s = speakWavelist(text, levels)!
       expect(s.waves, text).toHaveLength(8)

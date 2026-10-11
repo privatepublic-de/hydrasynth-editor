@@ -8,7 +8,7 @@ export const waveImage = (wave: number) => `${import.meta.env.BASE_URL}waves-pla
 
 /**
  * The wave a param's value selects, 'silence', or null for Off (and for keys that aren't
- * waves). Wavelist slot 1 holds a wave number like the Single-mode wave; slots 2-8 put Off
+ * waves). Wavelist position 1 holds a wave number like the Single-mode wave; positions 2-8 put Off
  * and Silence ahead of the waves.
  */
 export function waveOf(key: string, value: number): number | 'silence' | null {
@@ -22,7 +22,7 @@ export interface WavelistEntry {
   wave: number | 'silence'
 }
 
-/** The wavelist as the synth scans it: Off slots drop out (a later wave moves up into their place). */
+/** The wavelist as the synth scans it: Off positions drop out (a later wave moves up into their place). */
 export function wavelist(patch: Patch, osc: number): WavelistEntry[] {
   const out: WavelistEntry[] = []
   for (let slot = 1; slot <= 8; slot++) {
@@ -41,7 +41,7 @@ export function scanPosition(patch: Patch, osc: number, length: number): number 
 /**
  * What the WaveScan position plays: the wavelist entry it is on or past, the next one, and how
  * far towards the next (0..1). The picture crossfades by `towards`; each entry's share of the
- * sound is shown on its slot.
+ * sound is shown on its position.
  */
 export function morphAt(patch: Patch, osc: number): { from: WavelistEntry; to?: WavelistEntry; towards: number } | null {
   const list = wavelist(patch, osc)
@@ -51,7 +51,7 @@ export function morphAt(patch: Patch, osc: number): { from: WavelistEntry; to?: 
   return { from: list[i], to: list[i + 1], towards: list[i + 1] ? at - i : 0 }
 }
 
-/** Each sounding slot's share (0..1) at the current WaveScan position, by slot number. */
+/** Each sounding position's share (0..1) at the current WaveScan position, by position number. */
 export function slotShares(patch: Patch, osc: number): Map<number, number> {
   const m = morphAt(patch, osc)
   const out = new Map<number, number>()

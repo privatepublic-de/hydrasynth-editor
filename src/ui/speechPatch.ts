@@ -698,8 +698,8 @@ const DECAYS: [number, number][] = (() => {
 })()
 
 /**
- * The WaveScan list for the voiced sounds, in order of first use, and each sound's slot: a wave
- * per sound, shared when two sounds pick the same one; past eight waves, a sound takes the slot
+ * The WaveScan list for the voiced sounds, in order of first use, and each sound's position: a wave
+ * per sound, shared when two sounds pick the same one; past eight waves, a sound takes the position
  * of the sound with the nearest vowel position.
  */
 function waveList(segments: Segment[], levels: (number[] | null)[], f0: number, distinct = false) {
@@ -844,8 +844,8 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
       ? // LFO 1-5 Rate (slots 5 and 11-14): nothing until the end, then all of them to the bottom.
         { target: 144, depth: 0, value: () => 0, glideMs: 0, end: 64 }
       : list
-      ? // Osc 1 WaveScan: the sound's slot (slot i of 8 sits at i/7 of the range). One step's glide
-        // at most: a longer ramp would play the slots between, other sounds' waves.
+      ? // Osc 1 WaveScan: the sound's position (position i of 8 sits at i/7 of the range). One step's glide
+        // at most: a longer ramp would play the positions between, other sounds' waves.
         { target: 13, depth: 1024, value: (s) => ((list.slotOf.get(s.shape ?? '') ?? 0) * 64) / 7, glideMs: Math.min(tune.vowelGlideMs, t.stepMs), end: ((list.slotOf.get(segments.at(-1)!.shape ?? '') ?? 0) * 64) / 7 }
       : // Osc 1 Pitch: stress, and the phrase falling by 2 semitones.
         { target: 11, depth: 1024, value: (_, at) => pitchAt(at) * PER_SEMITONE, glideMs: tune.pitchGlideMs, end: pitchAt(total) * PER_SEMITONE },
@@ -926,7 +926,7 @@ export function buildSpeechPatch(text: string, { speed = 1, waves, dictionary, t
   }
 
   if (list) {
-    // OSC 1 scans the waves (slots 2-8 store Off and Silence ahead of them; unused ones Off).
+    // OSC 1 scans the waves (positions 2-8 store Off and Silence ahead of them; unused ones Off).
     p.set('osc1mode', 1)
     p.set('osc1wavscan', 0)
     for (let slot = 1; slot <= 8; slot++) {

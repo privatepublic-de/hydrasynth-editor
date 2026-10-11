@@ -1,4 +1,4 @@
-// An oscillator's WaveScan list: the eight slots where the synth has them (Off gaps included,
+// An oscillator's WaveScan list: the eight positions where the synth has them (Off gaps included,
 // since the synth skips them and they change what a position plays), each wave's share of the
 // sound at the current position, and the position itself.
 import { useRef } from 'react'
@@ -13,7 +13,7 @@ import { WavelistFill } from './WavelistFill'
 
 const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8]
 const WAVES = 219
-/** Slots 2-8 store Off (0) and Silence (1) ahead of the waves; slot 1 stores the wave itself. */
+/** Positions 2-8 store Off (0) and Silence (1) ahead of the waves; position 1 stores the wave itself. */
 const stored = (slot: number, wave: number) => (slot === 1 ? wave : wave + 2)
 
 function WaveCell({ osc, slot, share }: { osc: number; slot: number; share: number }) {

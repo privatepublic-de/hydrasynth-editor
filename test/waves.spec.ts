@@ -4,7 +4,7 @@ import { entryPositions, morphAt, scanPosition, slotShares, waveOf, wavelist } f
 import { fixtureBytes } from './fakeSynth'
 
 describe('wavelist', () => {
-  it('maps slot values to waves: slot 1 directly, slots 2-8 after Off and Silence', () => {
+  it('maps position values to waves: position 1 directly, positions 2-8 after Off and Silence', () => {
     expect(waveOf('osc1type', 3)).toBe(3)
     expect(waveOf('osc1wavscanwave1', 0)).toBe(0)
     expect(waveOf('osc1wavscanwave2', 0)).toBeNull()
@@ -13,7 +13,7 @@ describe('wavelist', () => {
     expect(waveOf('filter1type', 3)).toBeNull()
   })
 
-  it('drops Off slots, so later waves move up, and finds the nearest to the scan position', () => {
+  it('drops Off positions, so later waves move up, and finds the nearest to the scan position', () => {
     const p = new Patch(fixtureBytes())
     p.set('osc1wavscanwave1', 3)
     p.set('osc1wavscanwave2', 0)
@@ -30,7 +30,7 @@ describe('wavelist', () => {
     expect(scanPosition(p, 1, list.length)).toBe(2)
   })
 
-  it('splits the sound between the two waves around the scan position, skipping Off slots', () => {
+  it('splits the sound between the two waves around the scan position, skipping Off positions', () => {
     const p = new Patch(fixtureBytes())
     p.set('osc1wavscanwave1', 3)
     p.set('osc1wavscanwave2', 0) // Off: wave 3 sounds second

@@ -1,6 +1,6 @@
 // Speech in a wavelist, talk-box style: English words become a row of speech sounds (spelling
 // rules plus a list of common words), and each sound becomes the wave whose harmonics, at the
-// note it is tuned for, best show that sound's formants. Sweeping WaveScan through the eight slots
+// note it is tuned for, best show that sound's formants. Sweeping WaveScan through the eight positions
 // then "says" the words. Single-cycle waves only hold steady spectra, so vowels and the voiced
 // sounds between them carry it; hisses get the noisiest bright waves, stops a gap of Silence.
 import { loadWaveCycles } from './waveCycles'
@@ -19,7 +19,7 @@ export const waveLevels = () => (levels ??= loadWaveCycles().then((cycles) => cy
 
 /** Harmonics measured per wave: up to ~8 kHz even for a note as low as C2. */
 export const HARMONICS = 128
-/** In a speech fill, a slot (2-8) left silent: the gap of a stop consonant or between words. */
+/** In a speech fill, a position (2-8) left silent: the gap of a stop consonant or between words. */
 export const SILENCE = -1
 
 /** Each harmonic's level in dB (loudest 0, floor -100), from one recorded cycle. */
@@ -386,11 +386,11 @@ export function waveForAll(sounds: string[], levels: (number[] | null)[], f0: nu
 }
 
 export interface Speech {
-  /** Eight waves for slots 1-8; SILENCE for a gap (never slot 1). */
+  /** Eight waves for positions 1-8; SILENCE for a gap (never position 1). */
   waves: number[]
-  /** What each slot says: a sound code, or '' for a gap. */
+  /** What each position says: a sound code, or '' for a gap. */
   sounds: string[]
-  /** Sounds left out to fit the eight slots. */
+  /** Sounds left out to fit the eight positions. */
   dropped: number
 }
 
@@ -398,7 +398,7 @@ const LIST = 8
 const PRIORITY: Record<Kind | 'gap', number> = { vowel: 3, glide: 2, nasal: 2, hiss: 2, stop: 1, gap: 0 }
 
 /**
- * Eight slots that say `text` when WaveScan sweeps through them, tuned for notes around `f0` Hz.
+ * Eight positions that say `text` when WaveScan sweeps through them, tuned for notes around `f0` Hz.
  * `levels`: harmonicLevels per wave. Null if the text has nothing to say.
  */
 export function speakWavelist(text: string, levels: (number[] | null)[], f0 = 130.81, dictionary?: Pronunciations | null): Speech | null {
@@ -418,7 +418,7 @@ export function speakWavelist(text: string, levels: (number[] | null)[], f0 = 13
     if (!waves.has(sound)) waves.set(sound, waveFor(sound, levels, f0))
     return waves.get(sound)!
   }
-  // Slot 1 can't be Silence and a gap at the end says nothing; a sound followed by one that
+  // Position 1 can't be Silence and a gap at the end says nothing; a sound followed by one that
   // plays the same wave just holds it.
   const tidy = () => {
     const out: typeof units = []

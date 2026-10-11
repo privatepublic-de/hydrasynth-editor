@@ -6,7 +6,7 @@ import { SpeechPatchDialog } from './SpeechPatchDialog'
 import { useEditor } from './store'
 
 const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8]
-/** Wavelist slots 2-8 store Off and Silence ahead of the waves; slot 1 stores the wave itself. */
+/** Wavelist positions 2-8 store Off and Silence ahead of the waves; position 1 stores the wave itself. */
 const stored = (slot: number, wave: number) => (slot === 1 ? wave : wave === SILENCE ? 1 : wave + 2)
 
 const SPEECH = 'speech'
@@ -44,7 +44,7 @@ export function WavelistFill({ osc }: { osc: number }) {
 
   return (
     <span className="wavelist-fill">
-      {style === SPEECH && said && <span className="wavelist-fill__said" title="The sound in each slot; · is a Silence gap">{said}</span>}
+      {style === SPEECH && said && <span className="wavelist-fill__said" title="The sound at each position; · is a Silence gap">{said}</span>}
       <select aria-label="Fill style" value={style} title={description} onChange={(e) => setStyle(e.target.value as FillStyle)}>
         {FILL_STYLES.map((s) => (
           <option key={s.id} value={s.id} title={s.description}>
