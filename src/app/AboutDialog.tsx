@@ -3,6 +3,11 @@ import licenseText from '../../LICENSE?raw'
 import noticeText from '../../NOTICE?raw'
 import { version } from '../../package.json'
 
+/** The third-party license texts NOTICE refers to, by file name (Apache-2.0.txt, MIT.txt, ...). */
+const LICENSE_TEXTS = Object.entries(
+  import.meta.glob<string>('../../LICENSES/*.txt', { query: '?raw', import: 'default', eager: true }),
+).map(([path, text]) => [path.slice(path.lastIndexOf('/') + 1), text] as const)
+
 /** Who made what the editor is built from, and under which license (NOTICE in full below). */
 const CREDITS: { what: string; who: string; license: string; href: string }[] = [
   {
@@ -74,6 +79,14 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
       <details>
         <summary>Notices in full</summary>
         <pre className="about-dialog__text">{noticeText}</pre>
+      </details>
+      <details>
+        <summary>Third-party license texts</summary>
+        {LICENSE_TEXTS.map(([name, text]) => (
+          <pre key={name} className="about-dialog__text">
+            {`${name}\n\n${text}`}
+          </pre>
+        ))}
       </details>
       <div className="write-dialog__actions">
         <button type="button" className="function-button function-button--primary" onClick={() => ref.current?.close()} autoFocus>

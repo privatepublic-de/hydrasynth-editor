@@ -5,7 +5,7 @@ project builds on were reverse engineered by Sean Luke and contributors for
 Edisyn (https://github.com/eclab/edisyn, edisyn/synth/asmhydrasynth/info/):
 
   Copyright 2023 by Sean Luke
-  Licensed under the Apache License, Version 2.0
+  Licensed under the Apache License, Version 2.0 (full text in LICENSES/Apache-2.0.txt)
   http://www.apache.org/licenses/LICENSE-2.0
 
 src/params/generated.ts is generated from that driver (its parameter layout,
@@ -26,8 +26,6 @@ CC BY 4.0 as well; the editor shows them only until public/wave-cycles.json has 
 public/wave-cycles.json holds one cycle per wave recorded from the synth's audio output
 (tools/recordWaves.ts, tools/recordPhases.ts, tools/extractCycles.ts), drawn in the colours of those images: their
 line colour and harmonic bars (CC BY 4.0).
-public/waves-plain/ holds the same images with the wave's name removed (tools/stripWaveNames.ts),
-CC BY 4.0 as well.
 
 public/pronunciations.txt is generated (tools/buildPronunciations.ts) from the CMU Pronouncing
 Dictionary (https://github.com/cmusphinx/cmudict):
@@ -75,15 +73,16 @@ undo-2, redo-2) are Lucide's
 
   Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather
   (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
-  Licensed under the ISC License.
+  Licensed under the ISC License (full text in LICENSES/ISC.txt).
 
 The fonts Barlow and Barlow Condensed (bundled through @fontsource/barlow and
 @fontsource/barlow-condensed):
 
   Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
-  Licensed under the SIL Open Font License, Version 1.1 (https://openfontlicense.org)
+  Licensed under the SIL Open Font License, Version 1.1 (https://openfontlicense.org,
+  full text in LICENSES/OFL-1.1.txt)
 
-Bundled libraries, each under the MIT License:
+Bundled libraries, each under the MIT License (full text in LICENSES/MIT.txt):
 
   React, React DOM, scheduler: Copyright (c) Facebook, Inc. and its affiliates.
   use-sync-external-store: Copyright (c) Meta Platforms, Inc. and affiliates.
