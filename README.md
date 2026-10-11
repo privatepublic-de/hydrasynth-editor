@@ -7,6 +7,14 @@ filter response curve, knobs with their modulation badges, and pads to play
 notes](docs/screenshot.png)](https://privatepublic-de.github.io/hydrasynth-editor/?demo)
 <sub>Click the picture to open the editor in demo mode: a built-in patch, no synth needed.</sub>
 
+## How it was made
+
+This editor is vibe-coded with [Claude](https://claude.com/claude-code) by Anthropic: Peter
+Witzel designed it and tested it on the synth, Claude wrote the code. Every commit says so in a
+`Co-Authored-By: Claude` line. What it knows about the Hydrasynth comes from Edisyn's reverse
+engineering (see [NOTICE](NOTICE)) and from checks on a Hydrasynth Desktop
+([docs/FINDINGS.md](docs/FINDINGS.md)).
+
 ## Running it
 
 **Open the editor: https://privatepublic-de.github.io/hydrasynth-editor/**
