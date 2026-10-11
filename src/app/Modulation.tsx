@@ -20,12 +20,12 @@ function describe(m: Modulation, patch: Patch): string {
   }
   const depth = param(`macro${m.macro}depth${m.slot}`)
   const name = patch.macroName(m.macro).slice(0, 8).trim() || `Macro ${m.macro}`
-  return `Macro ${m.macro} (${name}), slot ${m.slot}: depth ${formatValue(depth, patch.get(depth.key))}`
+  return `Macro ${m.macro} (${name}), assignment ${m.slot}: depth ${formatValue(depth, patch.get(depth.key))}`
 }
 
 const badgeText = (m: Modulation) => (m.kind === 'matrix' ? `R${m.route}` : `M${m.macro}`)
 
-/** One small button per route or macro slot modulating the param; each jumps to its row. */
+/** One small button per route or macro assignment modulating the param; each jumps to its row. */
 export function ModBadges({ paramKey }: { paramKey: string }) {
   const mods = useModulations().get(paramKey)
   const patch = useEditor((s) => s.sync?.patch)
@@ -50,7 +50,7 @@ export function ModBadges({ paramKey }: { paramKey: string }) {
   )
 }
 
-/** The right-click menu of a param: add a mod-matrix route or macro slot for it, or go to one. */
+/** The right-click menu of a param: add a mod-matrix route or macro assignment for it, or go to one. */
 export function ParamMenu() {
   const menu = useEditor((s) => s.menu)
   const close = useEditor((s) => s.closeMenu)
@@ -123,7 +123,7 @@ export function ParamMenu() {
       {existing.length > 0 && <hr />}
       {existing.map((m) => (
         <button key={badgeText(m) + (m.kind === 'macro' ? m.slot : '')} type="button" role="menuitem" onClick={run(() => reveal(m))}>
-          Show {m.kind === 'matrix' ? `route ${m.route}` : `Macro ${m.macro}, slot ${m.slot}`}
+          Show {m.kind === 'matrix' ? `route ${m.route}` : `Macro ${m.macro}, assignment ${m.slot}`}
         </button>
       ))}
     </div>

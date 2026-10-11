@@ -51,7 +51,7 @@ export const MATRIX_ROUTES = 32
 export const MACROS = 8
 export const MACRO_SLOTS = 8
 
-/** Every param modulated in the patch, with the routes and macro slots doing it. */
+/** Every param modulated in the patch, with the routes and macro assignments doing it. */
 export function modulations(patch: Patch): Map<string, Modulation[]> {
   const out = new Map<string, Modulation[]>()
   const add = (dest: number, m: Modulation) => {
@@ -74,14 +74,14 @@ export function modulations(patch: Patch): Map<string, Modulation[]> {
 export const freeRoute = (patch: Patch) =>
   range(MATRIX_ROUTES).find((r) => !patch.get(`modmatrix${r}modtarget`) && !patch.get(`modmatrix${r}modsource`))
 
-/** The first unused destination slot of a macro. */
+/** The first unused assignment (destination) of a macro. */
 export const freeMacroSlot = (patch: Patch, macro: number) => range(MACRO_SLOTS).find((s) => !patch.get(`macro${macro}target${s}`))
 
 /** Depth's raw value for zero: the middle of 0..1024 (-128..128 on the synth). */
 export const CENTER_DEPTH = 512
 
 /**
- * When `key` puts something into an empty mod matrix route or macro slot, the depth to centre
+ * When `key` puts something into an empty mod matrix route or macro assignment, the depth to centre
  * with it: an empty slot's depth reads 0, which is full negative, not none.
  */
 export function newSlotDepth(patch: Patch, key: string, value: number): string | undefined {

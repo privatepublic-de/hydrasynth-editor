@@ -178,8 +178,8 @@ function ParamTable({ rows }: { rows: Page[] }) {
 }
 
 /**
- * A mod matrix route or macro slot that doesn't modulate anything yet: a route without a source
- * or a destination, a macro slot without a destination. Its dials do nothing, so they're left
+ * A mod matrix route or macro assignment that doesn't modulate anything yet: a route without a source
+ * or a destination, a macro assignment without a destination. Its dials do nothing, so they're left
  * out; its selects stay, to assign it.
  */
 function unassigned(row: Page, patch: Patch): boolean {

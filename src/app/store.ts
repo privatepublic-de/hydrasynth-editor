@@ -61,7 +61,7 @@ interface EditorState {
   revealModulation(m: Modulation, focusKey?: string): void
   /** Points a free mod-matrix route at `key`'s destination; returns the route, if one was free. */
   addRoute(key: string): number | undefined
-  /** Adds `key`'s destination to a free slot of a macro; returns the slot, if one was free. */
+  /** Adds `key`'s destination to a free assignment of a macro; returns it, if one was free. */
   addToMacro(key: string, macro: number): number | undefined
   /** The backup dialog's state; null while it's closed. */
   backup: BackupState | null
@@ -391,7 +391,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
     const depth = patch && newSlotDepth(patch, key, value)
     if (!depth) return put(key, value)
-    // A new route or macro slot starts with no depth, the same undo step.
+    // A new route or macro assignment starts with no depth, the same undo step.
     get().grouped(labelFor(key), () => {
       put(key, value)
       put(depth, CENTER_DEPTH)
