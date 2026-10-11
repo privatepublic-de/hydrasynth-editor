@@ -10,6 +10,8 @@ export function PatchHeading() {
   const origin = useEditor((s) => s.sync?.origin ?? null)
   const dirty = useEditor((s) => !!s.sync?.dirty)
   const demo = useEditor((s) => s.connection.status === 'demo')
+  // After a lost port the patch stays editable, but writing waits for the next connect.
+  const connected = useEditor((s) => s.connection.status === 'connected')
   const setName = useEditor((s) => s.setName)
   const busy = useEditor((s) => !!s.sync?.busy)
   const lastSlot = useEditor((s) => s.lastSlot)
@@ -32,7 +34,13 @@ export function PatchHeading() {
         Edited<span className="visually-hidden">, not written</span>
       </span>
       {!demo && (
-        <button type="button" className="function-button with-icon patch-heading__write" onClick={() => setWriting(true)} disabled={busy}>
+        <button
+          type="button"
+          className="function-button with-icon patch-heading__write"
+          onClick={() => setWriting(true)}
+          disabled={busy || !connected}
+          title={connected ? undefined : 'Connect to the synth to write'}
+        >
           <WriteIcon />
           Write…
         </button>

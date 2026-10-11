@@ -434,6 +434,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   async write(slot) {
+    if (!patchSync) return // offline: the Write button waits for a connection
     set({ writing: slot })
     await patchSync?.write(slot).catch(() => undefined)
     set({ writing: null })
