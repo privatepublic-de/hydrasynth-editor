@@ -74,7 +74,7 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
     <dialog ref={ref} className="write-dialog speech-dialog" onCancel={onDone}>
       <h2>Generate patch from “{title}”</h2>
       <p>
-        Replaces all of “{name}” with a patch that plays the note recorded in the file.
+        Replaces all of “{name}” with a patch to start from, made from the note recorded in the file.
         {demo ? '' : ' Can’t be undone.'}
         {dirty && ' Your unwritten changes are lost.'}
       </p>
@@ -113,6 +113,11 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
         Vibrato and tremolo as recorded
       </label>
       <p className="speech-dialog__said wav-dialog__said">{status}</p>
+      {result && (
+        <p className="wav-dialog__next">
+          Shape it from there with the macros ({result.macros.join(', ')}); velocity and aftertouch open the filter.
+        </p>
+      )}
       <div className="write-dialog__actions">
         <button type="button" className="function-button" onClick={() => (ref.current?.close(), onDone())}>
           Cancel

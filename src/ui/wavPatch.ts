@@ -14,6 +14,11 @@
 //   LFO 1      vibrato found in the note (route 2 to Osc 1 Pitch), else the Voice's own vibrato,
 //              which plays with the Mod Wheel up
 //   LFO 2      tremolo found in the note (the Amp's own LFO 2 Amount)
+//   Macros     1 Bright (Filt 1 Cutoff), 2 Timbre (FM Depth, WaveScan, or Resonance on one wave),
+//              3 Attack and 4 Release (ENV 2), 5 Movement (how far ENV 1 or 3 moves things), each
+//              knob in its middle (or at an end) where the patch is as generated: a starting point
+//   Playing    velocity scales the Amp envelope and opens the filter (ENV 1's amount, or route 3
+//              to Filt 1 Cutoff); aftertouch, channel or poly (routes 4 and 5), opens it further
 // Harmonic k of a wave sits at k times the note whatever note plays, so the waves' harmonics,
 // measured once at C2 (src/ui/waveSpeech.ts waveLevels), compare with the note's at its own pitch.
 // Measured on a Hydrasynth Desktop (fw 2.x) with tools/calibrateWavPatch.ts; see CALIBRATION.
@@ -102,6 +107,8 @@ export interface WavPatch {
   tremolo: Wobble | null
   /** How far the wave and filter are from the note's harmonics at its peak (dB, weighted RMS). */
   fit: number
+  /** The macros' names, in order. */
+  macros: string[]
   warnings: string[]
 }
 
@@ -400,6 +407,31 @@ export function buildWavPatch(
     p.set('amplfo2amount', clamp(Math.round(512 + (512 * swing) / CALIBRATION.tremoloSwing), 512))
   }
 
+  // Playing: velocity on the Amp envelope and the filter, aftertouch on the filter.
+  p.set('ampvelenv', 512 + PLAYING.ampVelocity * 8)
+  if (filterEnvelope) p.set('filter1velenv', 512 + PLAYING.filterVelocity * 8)
+  else {
+    // Velocity only adds: the cutoff as fitted at velocity 100, darker under, brighter over.
+    route(p, 3, 19 /* Note-On Vel */, 'filter1cutoff', PLAYING.velocityCutoff)
+    p.set('filter1cutoff', clamp(p.get('filter1cutoff') - Math.round((PLAYING.velocityCutoff * CALIBRATION.routeRawPerDepth * 100) / 127)))
+  }
+  route(p, 4, 16 /* Chan Aftertouch */, 'filter1cutoff', PLAYING.aftertouchCutoff)
+  route(p, 5, 17 /* Poly Aftertouch */, 'filter1cutoff', PLAYING.aftertouchCutoff)
+
+  // Macros: each knob starts where the patch as generated is.
+  const macros: string[] = []
+  const knob = (key: string, name: string, span: number, from: 'middle' | 'bottom' = 'middle') =>
+    macros.push(setMacro(p, macros.length + 1, name, key, span, from))
+  knob('filter1cutoff', 'Bright', 384)
+  if (fm) knob('mutant1depth', 'Timbre', 384)
+  else if (waves.length > 1) knob('osc1wavscan', 'Timbre', 512, 'bottom')
+  else knob('filter1resonance', 'Resonance', 640, 'bottom')
+  knob('env2attacksyncoff', 'Attack', 384)
+  knob('env2releasesyncoff', 'Release', 384)
+  // Movement: none at the knob's bottom, as generated in its middle, twice as much at the top.
+  const moving = filterEnvelope ? 'filter1env1amount' : fm?.envelope || waves.length > 1 ? 'modmatrix1depth' : null
+  if (moving) knob(moving, 'Movement', 2 * Math.min(512, p.get(moving) - 512))
+
   return {
     patch: p,
     note: noteName(a.midi) + (Math.abs(a.cents) >= 5 ? ` ${a.cents > 0 ? '+' : '−'}${Math.abs(a.cents)} cents` : ''),
@@ -409,8 +441,39 @@ export function buildWavPatch(
     vibrato,
     tremolo,
     fit,
+    macros,
     warnings: a.warnings,
   }
+}
+
+/**
+ * How a generated patch plays, beyond the recording (amounts of 64, route depths of 128), chosen
+ * by taste: velocity to the Amp envelope (linear: +32 took velocity 30 4.4 dB under 127, so +48
+ * ~7 dB) and the filter (route depth 16: ~1.4 octaves over the whole range; depth 8 moved it 0.58
+ * from 127 to 30), aftertouch to the cutoff (~1 octave at full pressure). Measured with
+ * tools/calibrateWavPatch.ts velocity.
+ */
+const PLAYING = { ampVelocity: 48, filterVelocity: 24, velocityCutoff: 16, aftertouchCutoff: 12 }
+
+/**
+ * Macro `n`, named `name`, on `key`: the knob moves it over `span` raw (a macro at depth d moves its
+ * target d * 8 raw over the knob, a Matrix Depth too), set where it is now: in its middle, else
+ * (`from` 'bottom', or no room either side) at the bottom or top. Only there does the knob land on
+ * the value exactly: a WaveScan route an eighth of a step short of its last wave keeps 2 % of the
+ * one before it, and that's heard. Returns the name.
+ */
+function setMacro(p: Patch, n: number, name: string, key: string, span: number, from: 'middle' | 'bottom'): string {
+  const v = p.get(key)
+  span = 2 * Math.round(span / 2) // the macro's depth (raw 512 + span / 2) stays whole
+  let knob = 0
+  if (from === 'middle' && v - span / 2 >= 0 && v + span / 2 <= 1024) knob = 512
+  else if (v + span > 1024) knob = 1024
+  p.set(key, v - (span * knob) / 1024)
+  p.setMacroName(n, name)
+  p.set(`macro${n}target1`, destinationOf(key)!)
+  p.set(`macro${n}depth1`, 512 + span / 2)
+  p.set(`macro${n}panelvalue`, knob)
+  return name
 }
 
 /** Mod matrix route `n`: `source` to the destination of `key`, at `depth` of -128..128. */
@@ -421,18 +484,18 @@ function route(p: Patch, n: number, source: number, key: string, depth: number) 
 }
 
 /**
- * What the patch plays and how to play it: "Play C3: Saw, 3 waves by WaveScan, filter envelope,
- * vibrato 5.4 Hz; fit 2.1 dB (inharmonic or noisy: best effort)", or with FM "Play C4: Mutant
- * FM 3:1, depth 12, depth envelope, ...".
+ * What the patch is made of, to take it from there: "Play C3: Orland 6 → Scorpio 8 by WaveScan,
+ * filter envelope, vibrato on the Mod Wheel", or with FM "Play C4: Mutant FM 3:1, its depth
+ * moving, ..."; a recording that isn't one clear note says so: "(noisy: a rough start)".
  */
-export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'fit' | 'warnings'>): string {
+export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
+  const name = (wave: number) => WAVE_FEATURES[wave]?.name ?? `Wave ${wave}`
   const parts = w.fm
-    ? [`Mutant FM ${w.fm.ratio}:1, depth ${Math.round(w.fm.depth / 8)}`, ...(w.fm.envelope ? ['depth envelope'] : [])]
-    : [WAVE_FEATURES[w.waves[0]]?.name ?? `Wave ${w.waves[0]}`]
-  if (w.waves.length > 1) parts.push(`${w.waves.length} waves by WaveScan`)
+    ? [`Mutant FM ${w.fm.ratio}:1${w.fm.envelope ? ', its depth moving' : ''}`]
+    : [w.waves.length > 1 ? `${name(w.waves[0])} → ${name(w.waves[w.waves.length - 1])} by WaveScan` : name(w.waves[0])]
   if (w.filterEnvelope) parts.push('filter envelope')
   parts.push(w.vibrato ? `vibrato ${w.vibrato.rateHz.toFixed(1)} Hz` : 'vibrato on the Mod Wheel')
   if (w.tremolo) parts.push(`tremolo ${w.tremolo.rateHz.toFixed(1)} Hz`)
-  const warn = w.warnings.length ? ` (${w.warnings.join(', ')}: best effort)` : ''
-  return `Play ${w.note}: ${parts.join(', ')}; fit ${w.fit.toFixed(1)} dB${warn}`
+  const warn = w.warnings.length ? ` (${w.warnings.join(', ')}: a rough start)` : ''
+  return `Play ${w.note}: ${parts.join(', ')}${warn}`
 }

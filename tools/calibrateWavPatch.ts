@@ -12,6 +12,10 @@
 //              raw values, against what they show
 //   vibrato    the Voice's vibrato (Amount 0.5 and 2, 5 Hz) with the Mod Wheel down and up; a Sine LFO 1
 //              into Osc 1 Pitch at route depth 8: cents to either side
+//   velocity   Amp Vel Env +32 and Note-On Vel on Filt 1 Cutoff (route depth 8) at velocities
+//              30, 64, 100 and 127: level (dB) and cutoff, against velocity 127
+//   macro      a macro (depth 32) at knobs 0..128 on Filt 1 Cutoff, and on Matrix 1 Depth with ENV 3
+//              (held full) routed to Filt 1 Cutoff at depth 0: where the cutoff goes, in raw
 //   tremolo    a Sine LFO 2 at 4 Hz through Amp LFO 2 Amount +16: dB to either side
 // Usage: npx vite-node tools/calibrateWavPatch.ts <experiment>
 import { analyse } from '../src/audio/analyse'
@@ -192,6 +196,55 @@ async function main() {
       p.set('modmatrix1depth', 512 + 4 * 8)
       const a = analyse({ samples: f32(await synth.take(p, note, 2)), sampleRate: RATE })
       console.log(`LFO 1 into Osc 1 Pitch at depth 8: ${JSON.stringify(a.vibrato)} -> at 128: ${((a.vibrato?.depth ?? 0) * 16).toFixed(0)} cents`)
+    } else if (experiment === 'velocity') {
+      const note = 48
+      const f0 = hz(note)
+      const count = Math.min(128, Math.floor(16000 / f0))
+      const open = harmonicDb(await synth.take(sawPatch(), note, 1), f0, count)
+      const level = (x: Float64Array) => {
+        let s = 0
+        for (let i = Math.round(0.3 * RATE); i < Math.round(0.9 * RATE); i++) s += x[i] * x[i]
+        return 10 * Math.log10(s / (0.6 * RATE))
+      }
+      const rows: [number, number, number][] = []
+      for (const velocity of [30, 64, 100, 127]) {
+        const p = sawPatch(384)
+        p.set('ampvelenv', 512 + 32 * 8)
+        p.set('modmatrix1modsource', 19) // Note-On Vel
+        p.set('modmatrix1modtarget', destinationOf('filter1cutoff')!)
+        p.set('modmatrix1depth', 512 + 4 * 8)
+        const x = await synth.take(p, note, 1, [], [], velocity)
+        rows.push([velocity, level(x), fitCutoffRatio(harmonicDb(x, f0, count), open).ratio * f0])
+      }
+      const top = rows[rows.length - 1]
+      for (const [velocity, db, cutoff] of rows)
+        console.log(`velocity ${velocity}: ${(db - top[1]).toFixed(1)} dB, cutoff ${cutoff.toFixed(0)} Hz (${Math.log2(cutoff / top[2]).toFixed(2)} octaves)`)
+    } else if (experiment === 'macro') {
+      const note = 48
+      const f0 = hz(note)
+      const count = Math.min(128, Math.floor(16000 / f0))
+      const open = harmonicDb(await synth.take(sawPatch(), note, 1), f0, count)
+      // Cutoff raw from Hz at C3 (keytrack 100 %): 1288 Hz at 512, 89.5 raw an octave (cutoff).
+      const raw = (cutoffHz: number) => Math.round(512 + 89.5 * Math.log2(cutoffHz / 1288))
+      for (const target of ['filter1cutoff', 'modmatrix1depth']) {
+        const rows: string[] = []
+        for (const knob of [0, 256, 512, 768, 1024]) {
+          const p = sawPatch(256)
+          if (target === 'modmatrix1depth') {
+            p.set('env3attacksyncoff', 0)
+            p.set('env3sustain', 1024)
+            p.set('modmatrix1modsource', 3)
+            p.set('modmatrix1modtarget', destinationOf('filter1cutoff')!)
+            p.set('modmatrix1depth', 512)
+          }
+          p.set('macro1target1', destinationOf(target)!)
+          p.set('macro1depth1', 512 + 32 * 4)
+          p.set('macro1panelvalue', knob)
+          const fit = fitCutoffRatio(harmonicDb(await synth.take(p, note, 1), f0, count), open)
+          rows.push(`knob ${knob / 8}: +${raw(fit.ratio * f0) - 256}`)
+        }
+        console.log(`macro depth 32 on ${target} (cutoff raw over 256): ${rows.join(', ')}`)
+      }
     } else if (experiment === 'tremolo') {
       for (const amount of [576, 640, 768, 1024]) {
         const p = sawPatch()
@@ -203,7 +256,7 @@ async function main() {
         console.log(`LFO 2 ${show('lfo2ratesyncoff', 600)} Hz, Amp LFO 2 Amount ${show('amplfo2amount', amount)}: ${JSON.stringify(a.tremolo)}`)
       }
     } else {
-      console.log('Usage: npx vite-node tools/calibrateWavPatch.ts cutoff|envamount|amp|vibrato|tremolo')
+      console.log('Usage: npx vite-node tools/calibrateWavPatch.ts cutoff|envamount|filterenv|amp|vibrato|velocity|tremolo')
     }
   } finally {
     synth.close()

@@ -9,6 +9,7 @@ import { decodeCycle } from '../src/ui/waveCycles'
 import { WAVE_FEATURES } from '../src/ui/waveFeatures.generated'
 import { harmonicLevels } from '../src/ui/waveSpeech'
 import { FM_CALIBRATION } from '../src/ui/fmModel'
+import { destinationOf } from '../src/ui/modDestinations'
 import { buildWavPatch, CALIBRATION, distance, fitFm, fitWave, wavStatus } from '../src/ui/wavPatch'
 import { RATE, sawAmps, tone } from './signals'
 
@@ -16,7 +17,16 @@ const data = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8'))
 const cycles: (Float32Array | null)[] = data.waves.map((w: { cycle: string } | null) => w && decodeCycle(w.cycle))
 const levels = cycles.map((c) => (c ? harmonicLevels(c) : null))
 const index = (n: string) => WAVE_FEATURES.findIndex((w) => w.name === n)
-const show = (p: Patch, key: string) => formatValue(param(key), p.get(key))
+/** `key` as the patch plays it: plus what any macro on it adds at its knob (depth d: d * 8 raw over the knob). */
+function played(p: Patch, key: string): number {
+  let v = p.get(key)
+  for (let m = 1; m <= 8; m++)
+    for (let slot = 1; slot <= 8; slot++)
+      if (p.get(`macro${m}target${slot}`) === destinationOf(key))
+        v += ((p.get(`macro${m}depth${slot}`) - 512) / 4) * 8 * (p.get(`macro${m}panelvalue`) / 1024)
+  return Math.round(v)
+}
+const show = (p: Patch, key: string) => formatValue(param(key), played(p, key))
 
 /** `cycle` played at `f0` for `seconds`, shaped by `level(t)`. */
 function play(cycle: Float32Array, f0: number, seconds: number, level: (t: number) => number = () => 1) {
@@ -78,7 +88,7 @@ describe('buildWavPatch', () => {
     expect(show(w.patch, 'filter1type')).toBe('LP Ladder 12')
     expect(show(w.patch, 'filter1keytrack')).toBe('100%')
     expect(w.note).toBe('A3')
-    expect(wavStatus(w)).toBe(`Play A3: Saw, vibrato on the Mod Wheel; fit ${w.fit.toFixed(1)} dB`)
+    expect(wavStatus(w)).toBe('Play A3: Saw, vibrato on the Mod Wheel')
   })
 
   it('sets the Amp envelope as recorded, or from a preset', () => {
@@ -92,7 +102,7 @@ describe('buildWavPatch', () => {
     const pad = buildWavPatch(pluck, { levels, envelope: 'pad' }).patch
     expect(show(pad, 'env2attacksyncoff')).toMatch(/ms|s/)
     expect(labelNumber(show(pad, 'env2attacksyncoff'))).toBeGreaterThan(600)
-    expect(pad.get('env2sustain')).toBeGreaterThan(512)
+    expect(played(pad, 'env2sustain')).toBeGreaterThan(512)
   })
 
   it('follows a note that darkens with a filter envelope, and its changing waves with WaveScan', () => {
@@ -114,7 +124,7 @@ describe('buildWavPatch', () => {
     expect(show(w.patch, 'modmatrix1modtarget')).toBe('Osc 1 WaveScan')
     // Depth 128 reaches position 8: n waves need (n - 1)/7 of it.
     expect(parseFloat(show(w.patch, 'modmatrix1depth'))).toBeCloseTo((128 * (w.waves.length - 1)) / 7, 0)
-    expect(wavStatus(w)).toContain(`${w.waves.length} waves by WaveScan`)
+    expect(wavStatus(w)).toContain(`${WAVE_FEATURES[w.waves[0]].name} → ${WAVE_FEATURES[w.waves.at(-1)!].name} by WaveScan`)
     expect(buildWavPatch(a, { levels, overTime: false }).waves).toHaveLength(1)
 
     const n = 20
@@ -125,7 +135,7 @@ describe('buildWavPatch', () => {
     }
     const d = buildWavPatch(analyse({ samples: dark, sampleRate: RATE }), { levels })
     expect(d.filterEnvelope).toBe(true)
-    expect(d.patch.get('filter1env1amount')).toBeGreaterThan(512)
+    expect(played(d.patch, 'filter1env1amount')).toBeGreaterThan(512)
     expect(wavStatus(d)).toContain('filter envelope')
   })
 
@@ -152,9 +162,36 @@ describe('buildWavPatch', () => {
     expect(w.filterEnvelope).toBe(false)
   })
 
+  it('puts what to shape next on macros, each knob where the patch is', () => {
+    const w = buildWavPatch(saw, { levels })
+    expect(w.macros).toEqual(['Bright', 'Resonance', 'Attack', 'Release'])
+    expect(w.patch.macroName(1)).toBe('Bright')
+    expect(show(w.patch, 'macro1target1')).toBe('Filt 1 Cutoff')
+    expect(show(w.patch, 'macro3target1')).toBe('Env 2 Attack')
+    // Unchanged by the macros, as played: a still note gets no resonance, an attack as recorded.
+    expect(show(w.patch, 'filter1resonance')).toBe('0.0')
+    expect(labelNumber(show(w.patch, 'env2attacksyncoff'))).toBeLessThan(20)
+    expect(w.patch.get('macro2panelvalue')).toBe(0)
+    // With movement over time, a fifth: none at the bottom, as generated in the middle.
+    const fm = buildWavPatch(analyse({ samples: fmTone(220, 2, (t) => 128 + 512 * Math.max(0, 1 - t / 0.6), 1.2), sampleRate: RATE }), { levels, source: 'fm' })
+    expect(fm.macros).toEqual(['Bright', 'Timbre', 'Attack', 'Release', 'Movement'])
+    expect(show(fm.patch, 'macro2target1')).toMatch(/Mut.*1.*Depth/)
+    expect(fm.patch.get('modmatrix1depth')).toBe(512)
+    expect(fm.patch.get('macro5panelvalue')).toBe(512)
+  })
+
+  it('plays: velocity on the Amp and the filter, aftertouch on the cutoff', () => {
+    const w = buildWavPatch(saw, { levels })
+    expect(show(w.patch, 'ampvelenv')).toBe('48.0')
+    expect(show(w.patch, 'modmatrix3modsource')).toBe('Note-On Vel')
+    expect(show(w.patch, 'modmatrix3modtarget')).toBe('Filt 1 Cutoff')
+    expect(show(w.patch, 'modmatrix4modsource')).toBe('Chan Aftertouch')
+    expect(show(w.patch, 'modmatrix5modsource')).toMatch(/^Poly A/)
+  })
+
   it('names what may be off in the status', () => {
     const w = buildWavPatch(saw, { levels })
-    expect(wavStatus({ ...w, warnings: ['noisy', 'clipped'] })).toMatch(/\(noisy, clipped: best effort\)$/)
+    expect(wavStatus({ ...w, warnings: ['noisy', 'clipped'] })).toMatch(/\(noisy, clipped: a rough start\)$/)
   })
 })
 
@@ -186,7 +223,7 @@ describe('Mutant FM', () => {
     expect(show(w.patch, 'mutant1ratio')).toBe('3.000')
     expect(show(w.patch, 'mutant1wet')).toBe('100%')
     expect(w.fm).toEqual({ ratio: 3, depth: 384, envelope: false })
-    expect(wavStatus(w)).toMatch(/^Play A3: Mutant FM 3:1, depth 48,/)
+    expect(wavStatus(w)).toMatch(/^Play A3: Mutant FM 3:1, vibrato/)
     expect(buildWavPatch(a, { levels, source: 'auto' }).fm).not.toBeNull()
     const saw = analyse({ samples: play(cycles[index('Saw')]!, 220, 0.6), sampleRate: RATE })
     const auto = buildWavPatch(saw, { levels, source: 'auto' })
@@ -205,7 +242,7 @@ describe('Mutant FM', () => {
     // A route at depth d moves the Depth d * 8 raw: about 512 here.
     expect(parseFloat(show(w.patch, 'modmatrix1depth'))).toBeGreaterThan(48)
     expect(labelNumber(show(w.patch, 'env3decaysyncoff'))).toBeGreaterThan(400)
-    expect(wavStatus(w)).toContain('depth envelope')
+    expect(wavStatus(w)).toContain('Mutant FM 2:1, its depth moving')
   })
 })
 

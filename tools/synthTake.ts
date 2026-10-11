@@ -29,6 +29,7 @@ export async function openSynth(file: string) {
   /**
    * Plays `patch` with `note` held `holdS`, sending `changes` [s after note-on, key, value] (key ccN: MIDI CC N); the recording (in `file`) from note-on.
    * `notes` [s after note-on, note, legato]: another note instead of the held one, overlapping it (legato) or after letting go.
+   * `velocity`: of every note played.
    */
   async function take(
     patch: Patch,
@@ -36,6 +37,7 @@ export async function openSynth(file: string) {
     holdS: number,
     changes: [number, string, number][] = [],
     notes: [number, number, boolean][] = [],
+    velocity = 100,
   ): Promise<Float64Array> {
     await session.uploadToRam(7, 127, patch.bytes)
     await session.reloadSlot(CHANNEL, 7, 127)
@@ -43,7 +45,7 @@ export async function openSynth(file: string) {
     const done = record(file, holdS + 0.9)
     await sleep(300)
     const t0 = Date.now()
-    session.sendRaw(noteOn(CHANNEL, note, 100))
+    session.sendRaw(noteOn(CHANNEL, note, velocity))
     held = note
     const events = [
       // 'cc1' and the like: a controller (the Mod Wheel) instead of a parameter.
@@ -55,7 +57,7 @@ export async function openSynth(file: string) {
         at,
         run: () => {
           if (!legato) session.sendRaw(noteOff(CHANNEL, held))
-          session.sendRaw(noteOn(CHANNEL, next, 100))
+          session.sendRaw(noteOn(CHANNEL, next, velocity))
           if (legato) session.sendRaw(noteOff(CHANNEL, held))
           held = next
         },

@@ -1106,6 +1106,10 @@ select {
   white-space: normal;
 }
 
+.wav-dialog__next {
+  margin: 0 0 12px;
+}
+
 .speech-dialog__nowrap {
   white-space: nowrap;
 }
