@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { WAVE_FEATURES } from '../ui/waveFeatures.generated'
 import { buildSpeechPatch } from '../ui/speechPatch'
 import { loadPronunciations, PITCHES, waveLevels, type Pronunciations } from '../ui/waveSpeech'
+import { isIndex, useSessionChoices } from './sessionChoices'
 import { useEditor } from './store'
 
 /**
@@ -21,24 +22,13 @@ const SPEEDS = [
   { label: 'Fast', speed: 0.75 },
 ]
 
-/** The dialog's choices, kept for the browser session (per-tab convenience only). */
-const CHOICES_KEY = 'hydrasynth-editor.speech'
-type Choices = { speed: number; source: number; pitch: number; sing: boolean }
-const DEFAULT_CHOICES: Choices = { speed: 1, source: 1, pitch: 1, sing: false }
-function storedChoices(): Choices {
-  try {
-    const v = { ...DEFAULT_CHOICES, ...JSON.parse(sessionStorage.getItem(CHOICES_KEY) ?? '{}') }
-    const ok = (i: unknown, n: number) => Number.isInteger(i) && (i as number) >= 0 && (i as number) < n
-    return {
-      speed: ok(v.speed, SPEEDS.length) ? v.speed : DEFAULT_CHOICES.speed,
-      source: ok(v.source, SOURCES.length) ? v.source : DEFAULT_CHOICES.source,
-      pitch: ok(v.pitch, PITCHES.length) ? v.pitch : DEFAULT_CHOICES.pitch,
-      sing: v.sing === true,
-    }
-  } catch {
-    return DEFAULT_CHOICES
-  }
-}
+/** The dialog's choices, kept for the browser session: the stored ones where still valid. */
+const readChoices = (v: Record<string, unknown>) => ({
+  speed: isIndex(v.speed, SPEEDS.length) ? v.speed : 1,
+  source: isIndex(v.source, SOURCES.length) ? v.source : 1,
+  pitch: isIndex(v.pitch, PITCHES.length) ? v.pitch : 1,
+  sing: v.sing === true,
+})
 
 /**
  * Asks before the whole patch is replaced by one that speaks `text` (src/ui/speechPatch.ts),
@@ -61,17 +51,7 @@ export function SpeechPatchDialog({ text, onDone }: { text: string; onDone: (sai
   const dirty = useEditor((s) => !!s.sync?.dirty)
   const demo = useEditor((s) => s.connection.status === 'demo')
   const loadPatch = useEditor((s) => s.loadPatch)
-  const [{ speed, source, pitch, sing }, setChoices] = useState(storedChoices)
-  const choose = (change: Partial<Choices>) =>
-    setChoices((c) => {
-      const next = { ...c, ...change }
-      try {
-        sessionStorage.setItem(CHOICES_KEY, JSON.stringify(next))
-      } catch {
-        // per-tab convenience only
-      }
-      return next
-    })
+  const [{ speed, source, pitch, sing }, choose] = useSessionChoices('hydrasynth-editor.speech', readChoices)
   const [input, setInput] = useState(text)
   const [dictionary, setDictionary] = useState<Pronunciations | null>(null)
   useEffect(() => {

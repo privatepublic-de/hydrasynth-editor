@@ -1,8 +1,6 @@
 import { useState } from 'react'
+import { NOTE_NAMES, noteName } from '../audio/pitch'
 import { useEditor } from './store'
-
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-const noteName = (n: number) => `${NOTE_NAMES[n % 12]}${Math.floor(n / 12) - 1}`
 
 /** 24 pads like the Desktop's, chromatic from the bottom left; play notes to audition the patch. */
 export function Pads() {

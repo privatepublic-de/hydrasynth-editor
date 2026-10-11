@@ -25,6 +25,7 @@
 import { formatValue } from '../params/display'
 import { initPatchBytes } from '../params/initPatch'
 import { Patch, param } from '../params/patch'
+import { valueTable } from './timeTables'
 import { VOWEL_MORPHS } from './vowelMorphs.generated'
 import { FORMANTS, pronounce, waveFor, waveForAll, type Pronunciations } from './waveSpeech'
 
@@ -686,16 +687,7 @@ export interface SpeechPatchOptions {
 }
 
 /** Envelope times (raw -> ms) the synth offers, read from its own display table. */
-const DECAYS: [number, number][] = (() => {
-  const def = param('env3decaysyncoff')
-  const out: [number, number][] = []
-  for (let v = def.min; v <= def.max; v++) {
-    const label = formatValue(def, v)
-    const n = parseFloat(label)
-    out.push([v, label.endsWith('ms') ? n : n * 1000])
-  }
-  return out
-})()
+const DECAYS = valueTable('env3decaysyncoff')
 
 /**
  * The WaveScan list for the voiced sounds, in order of first use, and each sound's position: a wave

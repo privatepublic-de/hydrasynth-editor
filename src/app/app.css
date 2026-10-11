@@ -1101,6 +1101,11 @@ select {
   text-overflow: ellipsis;
 }
 
+/* A patch from a WAV says more than a spelling: it wraps. */
+.wav-dialog__said {
+  white-space: normal;
+}
+
 .speech-dialog__nowrap {
   white-space: nowrap;
 }

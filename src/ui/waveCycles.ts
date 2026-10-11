@@ -16,7 +16,8 @@ export interface WaveCycle {
 let loaded: (WaveCycle | null)[] | null = null
 let loading: Promise<(WaveCycle | null)[]> | null = null
 
-function decode(base64: string): Float32Array {
+/** A cycle as public/wave-cycles.json stores it (base64 int16 LE) as -1..1. */
+export function decodeCycle(base64: string): Float32Array {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
   const ints = new Int16Array(bytes.buffer)
   return Float32Array.from(ints, (v) => v / 32767)
@@ -26,7 +27,7 @@ export function loadWaveCycles(): Promise<(WaveCycle | null)[]> {
   loading ??= fetch(`${import.meta.env.BASE_URL}wave-cycles.json`)
     .then((r) => (r.ok ? r.json() : { waves: [] }))
     .then((data: { waves: ({ cycle: string; level: number; line: string; bars: string[] } | null)[] }) => {
-      loaded = data.waves.map((w) => (w ? { cycle: decode(w.cycle), level: w.level, line: w.line, bars: w.bars } : null))
+      loaded = data.waves.map((w) => (w ? { cycle: decodeCycle(w.cycle), level: w.level, line: w.line, bars: w.bars } : null))
       return loaded
     })
     .catch(() => (loaded = []))

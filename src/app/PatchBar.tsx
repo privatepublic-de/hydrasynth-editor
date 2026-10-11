@@ -7,6 +7,7 @@ import { InitIcon, MenuIcon, OpenIcon, RedoIcon, UndoIcon } from './icons'
 import { NOT_STORED, SlotPicker } from './SlotPicker'
 import { SpeechPatchDialog } from './SpeechPatchDialog'
 import { useEditor } from './store'
+import { WavPatchDialog } from './WavPatchDialog'
 
 export function WriteDialog({ initial, onClose }: { initial: Slot; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null)
@@ -104,13 +105,14 @@ function SynthSwitchedDialog({ slot, onOpen, onKeep }: { slot: Slot; onOpen: () 
 }
 
 /**
- * Less frequent actions: the speech patch (once a patch is open), backup and restore (with a
+ * Less frequent actions: the speech patch and a patch from a WAV (once a patch is open), backup and restore (with a
  * synth connected), and About.
  */
 function MoreMenu({ withSynth }: { withSynth: boolean }) {
   const [open, setOpen] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const [words, setWords] = useState('hello world')
+  const [wav, setWav] = useState<File | null>(null)
   const [about, setAbout] = useState(false)
   const busy = useEditor((s) => !!s.sync?.busy)
   const patch = useEditor((s) => s.sync?.patch)
@@ -118,6 +120,7 @@ function MoreMenu({ withSynth }: { withSynth: boolean }) {
   const openRestore = useEditor((s) => s.openRestore)
   const ref = useRef<HTMLSpanElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  const wavInput = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (!open) return
     ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
@@ -154,6 +157,20 @@ function MoreMenu({ withSynth }: { withSynth: boolean }) {
               }}
             >
               Generate speech patch…
+            </button>
+          )}
+          {patch && (
+            <button
+              type="button"
+              role="menuitem"
+              title="Replace the patch with one that plays the note recorded in a WAV file"
+              disabled={busy}
+              onClick={() => {
+                setOpen(false)
+                wavInput.current?.click()
+              }}
+            >
+              Generate patch from WAV…
             </button>
           )}
           {withSynth && (
@@ -204,6 +221,18 @@ function MoreMenu({ withSynth }: { withSynth: boolean }) {
           }}
         />
       )}
+      {wav && <WavPatchDialog file={wav} onDone={() => setWav(null)} />}
+      <input
+        ref={wavInput}
+        type="file"
+        accept=".wav,audio/wav,audio/x-wav"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = '' // the same file can be picked again
+          if (file) setWav(file)
+        }}
+      />
       <input
         ref={fileInput}
         type="file"
