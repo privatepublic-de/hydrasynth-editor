@@ -11,9 +11,9 @@ notes](docs/screenshot.png)](https://privatepublic-de.github.io/hydrasynth-edito
 
 This editor is vibe-coded with [Claude](https://claude.com/claude-code) by Anthropic: Peter
 Witzel designed it and tested it on the synth, Claude wrote the code. Every commit says so in a
-`Co-Authored-By: Claude` line. What it knows about the Hydrasynth comes from Edisyn's reverse
-engineering (see [NOTICE](NOTICE)) and from checks on a Hydrasynth Desktop
-([docs/FINDINGS.md](docs/FINDINGS.md)).
+`Co-Authored-By: Claude` line. What it knows about the Hydrasynth comes from Sean Luke's reverse
+engineering for [Edisyn](https://github.com/eclab/edisyn) (see [NOTICE](NOTICE)) and from checks
+on a Hydrasynth Desktop ([docs/FINDINGS.md](docs/FINDINGS.md)).
 
 ## Running it
 
@@ -130,4 +130,5 @@ See `docs/FINDINGS.md` for what the editor knows about the synth beyond Edisyn, 
 Synth settings: MIDI channel as you like, Param TX/RX = NRPN,
 Program Change RX on.
 
-See NOTICE for the reverse-engineering work this builds on (Edisyn).
+See [NOTICE](NOTICE) for the reverse-engineering work this builds on:
+[Edisyn](https://github.com/eclab/edisyn) by Sean Luke.
