@@ -1,6 +1,7 @@
 // Plays the patch generated from a WAV (src/ui/wavPatch.ts) on the synth and compares the recording
 // with the WAV, both through the same analysis (src/audio/analyse.ts): the harmonics at the peak
-// (plain dB RMS of the first 32, floored at -60: fixed, whatever weighting the fit uses), brightness over time, the level's shape, pitch and wobble. The
+// (plain dB RMS of the first 32, floored at -60: fixed, whatever weighting the fit uses), octave bands
+// (for noise, where harmonics mean nothing), brightness over time, the level's shape, pitch and wobble. The
 // recordings go to local/wav-patches/<name>-<envelope>.wav, and the WAV then the synth in one file
 // to local/wav-patches/ab/, for listening.
 // Usage: npx vite-node tools/scoreWavPatch.ts <file.wav>... [--source waves|fm|auto] [--envelope detect|pluck|keys|pad] [--steady]
@@ -52,6 +53,13 @@ async function main() {
   const synth = await openSynth(FILE)
   try {
     for (const file of files) {
+      try {
+        await score(file)
+      } catch (e) {
+        console.log(`${basename(file, '.wav')}: ${(e as Error).message}`)
+      }
+    }
+    async function score(file: string) {
       const target = analyse(parseWav(readFileSync(file)))
       const name = basename(file, '.wav')
       const built = buildWavPatch(target, { levels, peaks, source, envelope, overTime: !args.includes('--steady'), name })
@@ -74,6 +82,11 @@ async function main() {
       // Compared at the WAV's pitch, so a take that reads an octave off is still compared as played.
       const gotLevels = harmonicsAt(Float32Array.from(x), RATE, target.f0, got.peakS * RATE, got.peakS * RATE + Math.max(8 * (RATE / target.f0), 0.1 * RATE), 32).levels
       console.log(`  harmonics at the peak: ${rmsDb(target.spectrum.levels, gotLevels).toFixed(1)} dB from the WAV`)
+      // Octave bands, for noise as for notes: the same measure of both, any overall level taken out.
+      const used = target.bands.map((v, i) => [v, got.bands[i]]).filter(([v]) => v > -40)
+      const offset = used.reduce((s, [v, g]) => s + v - g, 0) / used.length
+      const bandRms = Math.sqrt(used.reduce((s, [v, g]) => s + (v - g - offset) ** 2, 0) / used.length)
+      console.log(`  octave bands: ${bandRms.toFixed(1)} dB from the WAV (wav ${target.bands.map((v) => v.toFixed(0)).join(' ')} / synth ${got.bands.map((v) => v.toFixed(0)).join(' ')})`)
       console.log(`  brightness / 0.1 s: wav ${tb.slice(0, n).map((v) => v.toFixed(1)).join(' ')}`)
       console.log(`                      synth ${gb.slice(0, n).map((v) => v.toFixed(1)).join(' ')}`)
       const [ta, ga] = [target.adsr, got.adsr]

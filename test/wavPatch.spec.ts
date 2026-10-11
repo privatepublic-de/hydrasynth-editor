@@ -250,6 +250,40 @@ describe('buildWavPatch', () => {
     expect(show(drifting.patch, 'lfo3wave')).toBe('Random')
   })
 
+  it('plays noise as noise: its colour through the low-pass that shapes it, its filter moving', () => {
+    /** `x` through a two-pole low-pass at `hz` (Q 0.54, LP Ladder 12's shape), the cutoff moving if a function. */
+    const lowPass = (x: Float32Array, hz: number | ((t: number) => number)) => {
+      let [y1, y2, x1, x2] = [0, 0, 0, 0]
+      return x.map((v, i) => {
+        const w = (2 * Math.PI * (typeof hz === 'number' ? hz : hz(i / RATE))) / RATE
+        const alpha = Math.sin(w) / (2 * 0.54)
+        const c = Math.cos(w)
+        const [b0, b1, a0, a1, a2] = [(1 - c) / 2, 1 - c, 1 + alpha, -2 * c, 1 - alpha]
+        const y = (b0 * v + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2) / a0
+        ;[x2, x1, y2, y1] = [x1, v, y1, y]
+        return y
+      })
+    }
+    const burst = (x: Float32Array, decayS: number) => x.map((v, i) => v * Math.min(1, i / 50) * Math.exp(-i / RATE / decayS))
+    const hiss = buildWavPatch(analyse({ samples: burst(lowPass(noise(1), 2000), 0.3), sampleRate: RATE }), { levels })
+    expect(hiss.noise).not.toBeNull()
+    expect(hiss.noise!.colour).toBe('White')
+    expect(Math.abs(Math.log2(hiss.noise!.cutoffHz / 2000))).toBeLessThan(0.75)
+    expect(hiss.patch.get('mixerosc1vol')).toBe(0)
+    expect(hiss.patch.get('mixernoisevol')).toBe(1024)
+    expect(show(hiss.patch, 'mixernoisefilterratio')).toBe('100:0') // through Filter 1
+    expect(hiss.vibrato).toBeNull()
+    expect(wavStatus(hiss)).toMatch(/^Play any key \(the filter as at C4\): white noise through a low-pass at [12]\.\d kHz/)
+    expect(hiss.warnings).not.toContain('no clear single note')
+    // A burst that darkens as it fades: ENV 1 on the filter.
+    const closing = buildWavPatch(analyse({ samples: burst(lowPass(noise(1.5), (t) => 300 + 8000 * Math.exp(-t / 0.15)), 0.8), sampleRate: RATE }), { levels })
+    expect(closing.noise).not.toBeNull()
+    expect(closing.filterEnvelope).toBe(true)
+    expect(played(closing.patch, 'filter1env1amount')).toBeGreaterThan(512)
+    // A note keeps its oscillator.
+    expect(buildWavPatch(saw, { levels }).noise).toBeNull()
+  })
+
   it('names what may be off in the status', () => {
     const w = buildWavPatch(saw, { levels })
     expect(wavStatus({ ...w, warnings: ['noisy', 'clipped'] })).toMatch(/\(noisy, clipped: a rough start\)$/)

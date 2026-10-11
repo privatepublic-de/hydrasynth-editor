@@ -153,6 +153,10 @@ describe('analyse', () => {
     expect(c.warnings.some((w) => w === 'no clear single note' || w === 'inharmonic or noisy')).toBe(true)
     expect(analyse({ samples: tone(220, [1.5], 1).map((v) => Math.max(-1, Math.min(1, v))), sampleRate: RATE }).warnings).toContain('clipped')
     expect(() => analyse({ samples: new Float32Array(RATE), sampleRate: RATE })).toThrow('silent')
+    // No repeat at all: a note stands in, its clarity 0.
+    const hiss = analyse({ samples: noise(0.5), sampleRate: RATE })
+    expect(hiss.warnings).toContain('no clear single note')
+    expect(Number.isFinite(hiss.f0)).toBe(true)
   })
 
   it('is not fooled by wobble on noise', () => {

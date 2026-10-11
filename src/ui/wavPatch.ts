@@ -26,11 +26,15 @@
 //              knob in its middle (or at an end) where the patch is as generated: a starting point
 //   Playing    velocity scales the Amp envelope and opens the filter (ENV 1's amount, or route 3
 //              to Filt 1 Cutoff); aftertouch, channel or poly (routes 4 and 5), opens it further
+// A recording with no note in it (little in harmonics, no clear repeat: a hi-hat, a crash, a clap)
+// gets the noise source instead, in the nearest colour through Filter 1 at the cutoff that shapes
+// its octave bands, ENV 1 following its brightness (buildNoisePatch).
 // Harmonic k of a wave sits at k times the note whatever note plays, so the waves' harmonics,
 // measured once at C2 (src/ui/waveSpeech.ts waveLevels), compare with the note's at its own pitch.
 // Measured on a Hydrasynth Desktop (fw 2.x) with tools/calibrateWavPatch.ts; see CALIBRATION.
 import type { Adsr, SoundAnalysis, Wobble } from '../audio/analyse'
 import { detuneLevel } from '../audio/dirt'
+import { BAND_HZ } from '../audio/bands'
 import { noteName } from '../audio/pitch'
 import { formatValue } from '../params/display'
 import { initPatchBytes } from '../params/initPatch'
@@ -146,6 +150,8 @@ export interface WavPatch {
   dirt: { noise: string | null; drift: number | null; detune: number | null; ensemble: boolean }
   /** OSC 2 plays a Sine under the wave. */
   sub: boolean
+  /** Noise instead of a note: the noise source's colour through a low-pass at `cutoffHz` (as at middle C). */
+  noise: { colour: string; cutoffHz: number } | null
   /** Mutant FM instead: its Ratio, Depth (raw) and whether ENV 3 moves the Depth. */
   fm: { ratio: number; depth: number; envelope: boolean } | null
   filterEnvelope: boolean
@@ -276,8 +282,17 @@ function brightness(a: SoundAnalysis, levels: number[]) {
  */
 function envelopeOf(a: SoundAnalysis, value: (f: SoundAnalysis['frames'][number]) => number, least: number) {
   const frames = sounding(a)
-  if (frames.length < 3) return null
-  const raw = frames.map(value)
+  return envelopeOfTrack(
+    frames.map((f) => f.t),
+    frames.map(value),
+    a.onsetS,
+    least,
+  )
+}
+
+/** envelopeOf for any track: `values` at `times` (s), the note starting at `startS`. */
+function envelopeOfTrack(times: number[], raw: number[], startS: number, least: number) {
+  if (raw.length < 3) return null
   const track = raw.map((_, i) => [raw[i - 1] ?? raw[i], raw[i], raw[i + 1] ?? raw[i]].sort((x, y) => x - y)[1])
   const top = track.indexOf(Math.max(...track))
   const end = track[track.length - 1]
@@ -286,8 +301,8 @@ function envelopeOf(a: SoundAnalysis, value: (f: SoundAnalysis['frames'][number]
   if (span < least) return null
   const fall = track[top] - end
   const half = track.findIndex((v, i) => i > top && track[top] - v >= 0.5 * fall)
-  const decayS = fall > 0 && half > 0 ? 2 * (frames[half].t - frames[top].t) : 0
-  return { track, base, span, attackS: frames[top].t - a.onsetS, decayS, sustain: (end - base) / span }
+  const decayS = fall > 0 && half > 0 ? 2 * (times[half] - times[top]) : 0
+  return { track, base, span, attackS: times[top] - startS, decayS, sustain: (end - base) / span }
 }
 
 /** The FM Ratio, Depth and cutoff (x pitch) closest to `target`; `ratio` and `cutoff` fix those. */
@@ -372,6 +387,7 @@ export function buildWavPatch(
   a: SoundAnalysis,
   { levels, peaks, source = 'waves', envelope = 'detect', overTime = true, wobble = true, dirt = true, name = '' }: WavPatchOptions,
 ): WavPatch {
+  if (isNoise(a)) return buildNoisePatch(a, { levels, envelope, overTime, name })
   const p = new Patch(initPatchBytes())
   p.name = name.slice(0, 16)
   const byWave = source === 'fm' ? null : fitWave(a.spectrum.levels, levels)
@@ -540,6 +556,35 @@ export function buildWavPatch(
     }
   }
 
+  const timbre: Timbre = fm ? ['mutant1depth', 'Timbre', 384, 'middle'] : waves.length > 1 ? ['osc1wavscan', 'Timbre', 512, 'bottom'] : RESONANCE
+  const macros = finish(p, filterEnvelope, timbre, filterEnvelope ? 'filter1env1amount' : fm?.envelope || waves.length > 1 ? 'modmatrix1depth' : null)
+
+  return {
+    patch: p,
+    note: noteName(a.midi) + (Math.abs(a.cents) >= 5 ? ` ${a.cents > 0 ? '+' : '−'}${Math.abs(a.cents)} cents` : ''),
+    waves,
+    sub,
+    dirt: added,
+    fm,
+    noise: null,
+    filterEnvelope,
+    vibrato,
+    tremolo,
+    fit,
+    macros,
+    warnings: a.warnings,
+  }
+}
+
+/** What macro 2 moves: key, name, span over the knob, where the knob starts. */
+type Timbre = [string, string, number, 'middle' | 'bottom']
+const RESONANCE: Timbre = ['filter1resonance', 'Resonance', 640, 'bottom']
+
+/**
+ * The same for every patch: velocity on the Amp envelope and the filter, aftertouch on the filter,
+ * and the macros (`moving`: what Movement scales, if anything moves). Returns the macros' names.
+ */
+function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: string | null): string[] {
   // Playing: velocity on the Amp envelope and the filter, aftertouch on the filter.
   p.set('ampvelenv', 512 + PLAYING.ampVelocity * 8)
   if (filterEnvelope) p.set('filter1velenv', 512 + PLAYING.filterVelocity * 8)
@@ -556,29 +601,93 @@ export function buildWavPatch(
   const knob = (key: string, name: string, span: number, from: 'middle' | 'bottom' = 'middle') =>
     macros.push(setMacro(p, macros.length + 1, name, key, span, from))
   knob('filter1cutoff', 'Bright', 384)
-  if (fm) knob('mutant1depth', 'Timbre', 384)
-  else if (waves.length > 1) knob('osc1wavscan', 'Timbre', 512, 'bottom')
-  else knob('filter1resonance', 'Resonance', 640, 'bottom')
+  knob(...timbre)
   knob('env2attacksyncoff', 'Attack', 384)
   knob('env2releasesyncoff', 'Release', 384)
   knob('filter1drive', 'Dirt', 512, 'bottom')
   // Movement: none at the knob's bottom, as generated in its middle, twice as much at the top.
-  const moving = filterEnvelope ? 'filter1env1amount' : fm?.envelope || waves.length > 1 ? 'modmatrix1depth' : null
   if (moving) knob(moving, 'Movement', 2 * Math.min(512, p.get(moving) - 512))
+  return macros
+}
+
+/** Whether a recording is noise rather than a note: little of it in harmonics, no clear repeat. */
+export const isNoise = (a: SoundAnalysis) => a.spectrum.share < NOISE.share && a.clarity < NOISE.clarity
+
+/** The note a noise patch's cutoff is placed for (keytrack 100 %: other keys move it along). */
+const NOISE_NOTE = { midi: 60, hz: 261.63 }
+const NOISE = { share: 0.35, clarity: 0.5, lostDb: 15 }
+
+/**
+ * The noise colour and LP Ladder 12 cutoff (Hz) whose octave bands come closest to `bands` (power
+ * density, dB): over the bands within 40 dB of the loudest, any overall level taken out, and not
+ * filtering away so much of the noise that it plays near silent.
+ */
+export function fitNoise(bands: number[]): { type: number; cutoffHz: number; fit: number } {
+  const used = BAND_HZ.map((hz, i) => ({ hz, db: bands[i] })).filter((b) => b.db > -40)
+  let best = { type: 0, cutoffHz: Infinity, fit: Infinity }
+  for (const colour of CALIBRATION.noise)
+    for (const cutoffHz of [Infinity, ...Array.from({ length: 33 }, (_, i) => 20000 * 2 ** (-i / 4))]) {
+      const d = used.map((b) => b.db - (colour.slope * Math.log2(b.hz / 1000) + lpDb(b.hz / cutoffHz)))
+      const mean = d.reduce((sum, v) => sum + v, 0) / d.length
+      // A peak made of a rising colour under a low cutoff is the right shape, but the filter throws
+      // away most of the noise and the patch plays near silent: past 15 dB lost, it fits the worse.
+      const power = (filtered: boolean) =>
+        BAND_HZ.reduce((sum, hz) => sum + hz * 10 ** ((colour.slope * Math.log2(hz / 1000) + (filtered ? lpDb(hz / cutoffHz) : 0)) / 10), 0)
+      const lost = 10 * Math.log10(power(false) / power(true))
+      const fit = Math.sqrt(d.reduce((sum, v) => sum + (v - mean) ** 2, 0) / d.length) + Math.max(0, lost - NOISE.lostDb) / 2
+      if (fit < best.fit - CLOSER) best = { type: colour.type, cutoffHz, fit }
+    }
+  return best
+}
+
+/**
+ * A patch for a recording that's noise: the noise source in the nearest colour through LP Ladder 12
+ * at the fitted cutoff (as at middle C, keytrack 100 %), ENV 1 following how its brightness moves,
+ * the Amp envelope as recorded or a preset. No oscillator, no vibrato, no dirt: it's all dirt.
+ */
+function buildNoisePatch(a: SoundAnalysis, { envelope = 'detect', overTime = true, name = '' }: WavPatchOptions): WavPatch {
+  const p = new Patch(initPatchBytes())
+  p.name = name.slice(0, 16)
+  const { type, cutoffHz, fit } = fitNoise(a.bands)
+  p.set('mixerosc1vol', 0)
+  p.set('noisetype', type)
+  p.set('mixernoisevol', 1024)
+  p.set('voicevibratoamount', 0)
+  p.set('filter1type', 0) // LP Ladder 12
+  p.set('filter1resonance', 0)
+  p.set('filter1keytrack', 768) // 100 %
+  const ratio = cutoffHz / NOISE_NOTE.hz
+  p.set('filter1cutoff', cutoffRaw(ratio, NOISE_NOTE.hz, NOISE_NOTE.midi))
+
+  // ENV 1 from the darkest the sound gets up to the brightest (its centroid moving as the cutoff).
+  let filterEnvelope = false
+  const loud = a.brightness.filter((f) => f.db > -24)
+  const moves = overTime && Number.isFinite(cutoffHz) ? envelopeOfTrack(loud.map((f) => f.t), loud.map((f) => Math.log2(f.hz)), a.onsetS, 0.5) : null
+  if (moves) {
+    filterEnvelope = true
+    // The fitted cutoff is the peak's; the envelope's lower end sits as far under it as the centroid does.
+    const atPeak = Math.log2(loud.reduce((x, f) => (Math.abs(f.t - a.peakS) < Math.abs(x.t - a.peakS) ? f : x)).hz)
+    p.set('filter1cutoff', clamp(Math.round(p.get('filter1cutoff') + (moves.base - atPeak) * CALIBRATION.cutoff.octaveRaw)))
+    p.set('filter1env1amount', clamp(Math.round(512 + (moves.span * CALIBRATION.cutoff.octaveRaw) / CALIBRATION.envAmountCutoffRaw), 512))
+    setEnvelope(p, 1, { attackS: moves.attackS, decayS: moves.decayS, sustain: moves.sustain, releaseS: 0.1 }, false)
+  }
+  setEnvelope(p, 2, ENVELOPES.find((e) => e.value === envelope)?.adsr ?? a.adsr, true)
+  const macros = finish(p, filterEnvelope, RESONANCE, filterEnvelope ? 'filter1env1amount' : null)
 
   return {
     patch: p,
-    note: noteName(a.midi) + (Math.abs(a.cents) >= 5 ? ` ${a.cents > 0 ? '+' : '−'}${Math.abs(a.cents)} cents` : ''),
-    waves,
-    sub,
-    dirt: added,
-    fm,
+    note: `any key (the filter as at ${noteName(NOISE_NOTE.midi)})`,
+    waves: [],
+    sub: false,
+    dirt: { noise: null, drift: null, detune: null, ensemble: false },
+    fm: null,
+    noise: { colour: formatValue(param('noisetype'), type), cutoffHz },
     filterEnvelope,
-    vibrato,
-    tremolo,
+    vibrato: null,
+    tremolo: null,
     fit,
     macros,
-    warnings: a.warnings,
+    warnings: a.warnings.filter((w) => w !== 'no clear single note' && w !== 'inharmonic or noisy'),
   }
 }
 
@@ -627,11 +736,16 @@ function route(p: Patch, n: number, source: number, key: string, depth: number) 
  * filter envelope, vibrato on the Mod Wheel", or with FM "Play C4: Mutant FM 3:1, its depth
  * moving, ..."; a recording that isn't one clear note says so: "(noisy: a rough start)".
  */
-export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
+export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 'noise' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
   const name = (wave: number) => WAVE_FEATURES[wave]?.name ?? `Wave ${wave}`
   // The waves in the order they play, each once in a row; past three, the first and the last.
   const order = w.waves.filter((v, i) => v !== w.waves[i - 1]).map(name)
   const scan = order.length > 3 ? [order[0], '…', order[order.length - 1]] : order
+  if (w.noise) {
+    const hz = w.noise.cutoffHz
+    const filter = Number.isFinite(hz) ? ` through a low-pass at ${hz >= 1000 ? `${(hz / 1000).toFixed(1)} kHz` : `${Math.round(hz)} Hz`}` : ''
+    return `Play ${w.note}: ${w.noise.colour.toLowerCase()} noise${filter}${w.filterEnvelope ? ', filter envelope' : ''}${w.warnings.length ? ` (${w.warnings.join(', ')}: a rough start)` : ''}`
+  }
   const parts = w.fm
     ? [`Mutant FM ${w.fm.ratio}:1${w.fm.envelope ? ', its depth moving' : ''}`]
     : [`${scan.join(' → ')}${w.waves.length > 1 ? ' by WaveScan' : ''}${w.sub ? ' over a Sine' : ''}`]

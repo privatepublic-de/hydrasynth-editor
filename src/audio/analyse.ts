@@ -1,6 +1,7 @@
 // What a recorded note is made of, for building a patch that plays it (src/ui/wavPatch.ts): its
 // pitch, its harmonics at its loudest and how they change, its level's shape (attack, decay,
 // sustain, release) and any vibrato or tremolo. Pure: samples in, numbers out.
+import { centroidTrack, octaveBands } from './bands'
 import { type Dirt, measureDirt } from './dirt'
 import { detectPeriod, noteOf, periodNear, refinePeriod } from './pitch'
 import { harmonicCount, harmonicsAt, type Harmonics } from './spectrum'
@@ -46,6 +47,10 @@ export interface SoundAnalysis {
   held: boolean
   /** The harmonics around the peak. */
   spectrum: Harmonics
+  /** Power density per octave band (src/audio/bands.ts BAND_HZ) around the peak, loudest 0: a noise's colour. */
+  bands: number[]
+  /** Its spectral centroid (Hz) and level (dB, loudest 0) over time: how a noise brightens or darkens. */
+  brightness: { t: number; hz: number; db: number }[]
   /** The harmonics every FRAME_S from onset to end (at most MAX_FRAMES_S of it). */
   frames: Snapshot[]
   adsr: Adsr
@@ -58,6 +63,8 @@ export interface SoundAnalysis {
 }
 
 const HOP_S = 0.005
+/** What a sound with no repeat in it gets as its note: middle C. */
+const NO_NOTE_HZ = 261.63
 const FRAME_S = 0.04
 /** Timbre over time is followed for the first few seconds: WaveScan and the filter's envelope settle by then. */
 const MAX_FRAMES_S = 4
@@ -88,9 +95,10 @@ export function analyse(audio: Audio): SoundAnalysis {
   let from = Math.min(at(first.ip) + Math.round(0.02 * sr), at(first.iEnd))
   let to = Math.min(at(first.iEnd), from + Math.round(0.5 * sr))
   if (to - from < 0.04 * sr) [from, to] = [at(first.onset), at(first.iEnd)]
-  const coarse = detectPeriod(x, sr, from, to)
-  if (!coarse.period) throw new Error('No pitch found in it')
-  const period = refinePeriod(x, sr, coarse.period, from, to)
+  // No repeat at all (a hi-hat, a crash): middle C stands in, and the note's clarity says 0.
+  const found = detectPeriod(x, sr, from, to)
+  const coarse = found.period ? found : { period: sr / NO_NOTE_HZ, clarity: 0 }
+  const period = found.period ? refinePeriod(x, sr, coarse.period, from, to) : coarse.period
   const f0 = sr / period
   const { midi, cents } = noteOf(f0)
   if (coarse.clarity < 0.8) warnings.push('no clear single note')
@@ -153,6 +161,8 @@ export function analyse(audio: Audio): SoundAnalysis {
     endS: at(iEnd) / sr,
     held,
     spectrum,
+    bands: octaveBands(x, sr, at(ip)),
+    brightness: centroidTrack(x, sr, at(onset), Math.min(at(iEnd), at(onset) + MAX_FRAMES_S * sr)),
     frames,
     // The attack on the finer curve: two periods of a low note would smear a fast one.
     adsr: adsrOf(rel, ip, iEnd, held, attackOf(first)),
