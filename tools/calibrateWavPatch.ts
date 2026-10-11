@@ -26,9 +26,12 @@
 //   ensemble   Pre-FX Chorus at 0.6 Hz and Post-FX Chorus at 6 Hz (half the depth), as a string
 //              machine's two sweeps, at depths 64/96 and wet 50..87 %: the table src/ui/wavPatch.ts
 //              matches a recording's chorus against
+//   pitchenv   ENV 4 on All Osc Pitch (mod matrix route 1), a Sine at C3: semitones per route depth with
+//              ENV 4 held full, and the pitch over time as it decays from full (Decay 896 ms, Sustain 0)
 //   tremolo    a Sine LFO 2 at 4 Hz through Amp LFO 2 Amount +16: dB to either side
 // Usage: npx vite-node tools/calibrateWavPatch.ts <experiment>
 import { analyse } from '../src/audio/analyse'
+import { detectPeriod } from '../src/audio/pitch'
 import { harmonicsAt } from '../src/audio/spectrum'
 import { formatValue } from '../src/params/display'
 import { initPatchBytes } from '../src/params/initPatch'
@@ -358,6 +361,43 @@ async function main() {
             console.log(`{ depth: ${depth}, wet: ${wet}, cents: ${c ? c.cents.toFixed(1) : 0}, beat: ${c ? c.beat.toFixed(1) : 0} }, // detune ${d.detune ? d.detune.cents.toFixed(1) : '-'}, drift ${d.drift.toFixed(1)}`)
           }
         }
+    } else if (experiment === 'pitchenv') {
+      const note = 48
+      const sine = () => {
+        const p = sawPatch()
+        p.set('osc1type', 0)
+        p.set('env4bpmsync', 0)
+        p.set('env4attacksyncoff', 0)
+        p.set('modmatrix1modsource', 4) // Env 4
+        p.set('modmatrix1modtarget', 19) // All Osc Pitch
+        return p
+      }
+      /** The pitch (semitones from C3) every 40 ms, each window 30 ms, from its own period search. */
+      const pitchTrack = (x: Float32Array) => {
+        const out: number[] = []
+        for (let t = 0; t + 0.03 * RATE < x.length; t += 0.04 * RATE) {
+          const { period, clarity } = detectPeriod(x, RATE, t, t + Math.round(0.03 * RATE))
+          out.push(period && clarity > 0.8 ? 12 * Math.log2(RATE / period / hz(note)) : NaN)
+        }
+        return out
+      }
+      for (const depth of [8, 16, 32]) {
+        const p = sine()
+        p.set('env4sustain', 1024)
+        p.set('modmatrix1depth', 512 + 4 * depth)
+        const track = pitchTrack(f32(await synth.take(p, note, 1))).filter(Number.isFinite)
+        const held = track.slice(Math.floor(track.length / 2))
+        console.log(`depth ${depth}, held: ${(held.reduce((s, v) => s + v, 0) / held.length).toFixed(2)} semitones`)
+      }
+      for (const curve of [64, 0, 96, 128]) {
+        const p = sine()
+        p.set('env4sustain', 0)
+        p.set('env4decaysyncoff', 512) // 896 ms
+        p.set('env4deccurve', curve)
+        p.set('modmatrix1depth', 512 + 4 * 64)
+        const track = pitchTrack(f32(await synth.take(p, note, 2)))
+        console.log(`decay 896 ms, curve ${show('env4deccurve', curve)}: ${track.slice(0, 30).map((v, i) => (i % 2 ? '' : `${i * 40}ms ${v.toFixed(1)}`)).filter(Boolean).join('  ')}`)
+      }
     } else if (experiment === 'tremolo') {
       for (const amount of [576, 640, 768, 1024]) {
         const p = sawPatch()

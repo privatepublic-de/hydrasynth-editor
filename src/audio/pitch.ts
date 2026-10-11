@@ -23,7 +23,8 @@ function nsdf(x: Float32Array, from: number, length: number, lag: number): numbe
 function parabola(y0: number, y1: number, y2: number): [number, number] {
   const d = y0 - 2 * y1 + y2
   if (d >= 0) return [0, y1]
-  const off = (0.5 * (y0 - y2)) / d
+  // A true peak lies within half a step of the middle point; a near-flat curve would throw it far.
+  const off = Math.max(-0.5, Math.min(0.5, (0.5 * (y0 - y2)) / d))
   return [off, y1 - 0.25 * (y0 - y2) * off]
 }
 
@@ -120,3 +121,83 @@ export function noteOf(hz: number): { midi: number; cents: number } {
 export const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 /** "C4" for MIDI 60, as PITCHES in src/ui/waveSpeech.ts count (C2 = 65.41 Hz). */
 export const noteName = (midi: number) => `${NOTE_NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`
+
+/** How clearly a step has to repeat to be followed: a short, dropping kick reads 0.6-0.8. */
+const FOLLOW_CLARITY = 0.6
+
+/** The period between `lo` and `hi` samples in `x[from..from+length)`, and how clearly it repeats (NSDF). */
+function periodBetween(x: Float32Array, from: number, length: number, lo: number, hi: number): { period: number; clarity: number } {
+  let bestLag = lo
+  let bestScore = -Infinity
+  const n: number[] = []
+  for (let lag = lo - 1; lag <= hi + 1; lag++) {
+    const s = nsdf(x, from, length, lag)
+    n[lag - lo + 1] = s
+    if (lag >= lo && lag <= hi && s > bestScore) {
+      bestScore = s
+      bestLag = lag
+    }
+  }
+  const i = bestLag - lo + 1
+  const [off, clarity] = parabola(n[i - 1], n[i], n[i + 1])
+  return { period: bestLag + off, clarity }
+}
+
+/**
+ * The period along a note, from `start` (where it's `period`) back to `from` and on to `to`: each
+ * step searched within 2.4 semitones of the last (an 808's octave drop in 50 ms is 2.4 a 10 ms
+ * step), so a glide of octaves is followed; NaN
+ * where it doesn't clearly repeat (an attack's noise); each at the middle of its window. Every 10 ms over the first half second,
+ * every 50 ms after; forward only until it has held still for 0.3 s.
+ */
+export function followPitch(x: Float32Array, sampleRate: number, period: number, start: number, from: number, to: number): { t: number; period: number }[] {
+  const out: { t: number; period: number }[] = []
+  const step = (t: number) => Math.round((t - from < 0.5 * sampleRate ? 0.01 : 0.05) * sampleRate)
+  const walk = (dir: 1 | -1) => {
+    let last = period
+    // Forward, only while it keeps moving: 0.3 s within a quarter semitone, and it has settled.
+    let anchor = { t: start, period }
+    for (let t = dir > 0 ? start : start - step(start); dir > 0 ? t < to : t >= from; t += dir * step(t)) {
+      if (dir > 0 && t - anchor.t > 0.3 * sampleRate) break
+      const lo = Math.max(2, Math.floor(last / 1.15))
+      const hi = Math.ceil(last * 1.15)
+      // Two periods: over more, a fast drop smears its own repeat.
+      const length = Math.max(2 * hi, Math.round(0.01 * sampleRate))
+      if (t + length + hi + 2 > x.length) break
+      const { period: p, clarity } = periodBetween(x, t, length, lo, hi)
+      if (clarity >= FOLLOW_CLARITY) {
+        last = p
+        if (Math.abs(12 * Math.log2(p / anchor.period)) > 0.25) anchor = { t, period: p }
+      }
+      out.push({ t: (t + length / 2) / sampleRate, period: clarity >= FOLLOW_CLARITY ? p : NaN })
+    }
+  }
+  walk(1)
+  walk(-1)
+  return out.sort((a, b) => a.t - b.t)
+}
+
+/**
+ * The period from one rising zero crossing to the next in `x[from..to)`, after a low-pass at
+ * `lowPassHz` (twice, one pole) keeps upper harmonics from crossing too: for a sound that's mostly
+ * its fundamental (a kick, a tom) dropping too fast for the period search to follow.
+ */
+export function crossingPeriods(x: Float32Array, sampleRate: number, from: number, to: number, lowPassHz: number): { t: number; period: number }[] {
+  const a = 1 - Math.exp((-2 * Math.PI * lowPassHz) / sampleRate)
+  let y1 = 0
+  let y2 = 0
+  let prev = 0
+  let lastCross = NaN
+  const out: { t: number; period: number }[] = []
+  for (let i = Math.max(0, from); i < Math.min(to, x.length); i++) {
+    y1 += a * (x[i] - y1)
+    y2 += a * (y1 - y2)
+    if (prev < 0 && y2 >= 0) {
+      const cross = i - 1 + prev / (prev - y2)
+      if (Number.isFinite(lastCross)) out.push({ t: (cross + lastCross) / 2 / sampleRate, period: cross - lastCross })
+      lastCross = cross
+    }
+    prev = y2
+  }
+  return out
+}

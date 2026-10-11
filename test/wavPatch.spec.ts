@@ -284,6 +284,25 @@ describe('buildWavPatch', () => {
     expect(buildWavPatch(saw, { levels }).noise).toBeNull()
   })
 
+  it('plays a pitch that drops into the note on ENV 4', () => {
+    let phase = 0
+    const kick = Float32Array.from({ length: Math.round(0.6 * RATE) }, (_, i) => {
+      const t = i / RATE
+      const v = 0.8 * Math.exp(-t / 0.2) * Math.sin(phase)
+      phase += (2 * Math.PI * (50 + 50 * Math.exp(-t / 0.03))) / RATE
+      return v
+    })
+    const w = buildWavPatch(analyse({ samples: kick, sampleRate: RATE }), { levels })
+    expect(w.glide).toBeGreaterThanOrEqual(7)
+    expect(show(w.patch, 'modmatrix7modsource')).toBe('Env 4')
+    expect(show(w.patch, 'modmatrix7modtarget')).toBe('All Osc Pitch')
+    expect(parseFloat(show(w.patch, 'modmatrix7depth'))).toBeCloseTo(w.glide! * 10, -1)
+    expect(show(w.patch, 'env4sustain')).toBe('0.0')
+    expect(labelNumber(show(w.patch, 'env4decaysyncoff'))).toBeLessThan(400)
+    expect(wavStatus(w)).toContain(`pitch dropping ${w.glide} semitones into it`)
+    expect(buildWavPatch(saw, { levels }).glide).toBeNull()
+  })
+
   it('names what may be off in the status', () => {
     const w = buildWavPatch(saw, { levels })
     expect(wavStatus({ ...w, warnings: ['noisy', 'clipped'] })).toMatch(/\(noisy, clipped: a rough start\)$/)
@@ -356,5 +375,5 @@ describe.skipIf(!existsSync('local/wave-recordings/0.wav'))('fitWave on the synt
     }
     expect(tried).toBeGreaterThan(30)
     expect(found / tried).toBeGreaterThan(0.95)
-  })
+  }, 20000) // 44 recordings
 })

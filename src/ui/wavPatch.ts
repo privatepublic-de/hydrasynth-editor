@@ -16,6 +16,8 @@
 //   LFO 1      vibrato found in the note (route 2 to Osc 1 Pitch), else the Voice's own vibrato,
 //              which plays with the Mod Wheel up
 //   LFO 2      tremolo found in the note (the Amp's own LFO 2 Amount)
+//   ENV 4      a pitch that drops or slides into the note (a kick, a tom, a zap): route 7 to All Osc
+//              Pitch, its Decay and curve shaped like the drop
 //   Dirt       as recorded (src/audio/dirt.ts): noise between the harmonics on the noise source in
 //              the nearest colour, past Filter 1; a pitch that wanders on a Random LFO 3 (route 6, All Osc Pitch);
 //              a second voice some cents off on OSC 3, the same wave, OSC 1 as far the other way;
@@ -101,6 +103,17 @@ export const CALIBRATION = {
     { depth: 512, wet: 896, cents: 14.5 },
     { depth: 768, wet: 896, cents: 18.5 },
   ],
+  /**
+   * ENV 4 on All Osc Pitch (pitchenv): 0.1 semitone per route depth (0.8, 1.6, 3.2 at 8, 16, 32),
+   * falling from full in the Decay shown (896 ms: at 0 by 880, linear). Per Decay curve, where it
+   * is half way down (share of the Decay shown) and how much later nine tenths (x the half way).
+   */
+  pitchSemitonesPerDepth: 0.1,
+  pitchCurves: [
+    { curve: 64, half: 0.5, tenth: 1.8 }, // Linear
+    { curve: 96, half: 0.29, tenth: 2.3 }, // Exp 32
+    { curve: 128, half: 0.04, tenth: 3.3 }, // Exp 64
+  ],
   /** A Random LFO (1.5 Hz, Smooth 127) on All Osc Pitch: cents of drift per route depth (drift: 4.9 at 4, 8.9 at 8; Analog Feel drifts none within a note). */
   driftCentsPerDepth: 1.15,
   /** The Voice's own vibrato only plays with the Mod Wheel up: cents to either side per Amount raw (vibrato: 0.5 47, 2.0 186). */
@@ -152,6 +165,8 @@ export interface WavPatch {
   sub: boolean
   /** Noise instead of a note: the noise source's colour through a low-pass at `cutoffHz` (as at middle C). */
   noise: { colour: string; cutoffHz: number } | null
+  /** A pitch that drops (or rises, negative) this many semitones into the note, on ENV 4. */
+  glide: number | null
   /** Mutant FM instead: its Ratio, Depth (raw) and whether ENV 3 moves the Depth. */
   fm: { ratio: number; depth: number; envelope: boolean } | null
   filterEnvelope: boolean
@@ -477,6 +492,18 @@ export function buildWavPatch(
     }
   }
 
+  // ENV 4 on All Osc Pitch: the drop (or rise) into the note, its curve as the recording's shape.
+  let glide: number | null = null
+  if (a.glide) {
+    const g = a.glide
+    const shape = CALIBRATION.pitchCurves.reduce((x, c) => (Math.abs(c.tenth - g.tenthS / g.halfS) < Math.abs(x.tenth - g.tenthS / g.halfS) ? c : x))
+    const depth = clamp(g.semitones / CALIBRATION.pitchSemitonesPerDepth, -128, 128)
+    setEnvelope(p, 4, { attackS: 0, decayS: g.halfS / shape.half, sustain: 0, releaseS: 0 }, false)
+    p.set('env4deccurve', shape.curve)
+    route(p, 7, 4 /* Env 4 */, 'allosc', depth)
+    glide = Math.round(depth * CALIBRATION.pitchSemitonesPerDepth)
+  }
+
   // ENV 2, the Amp.
   const adsr = ENVELOPES.find((e) => e.value === envelope)?.adsr ?? a.adsr
   setEnvelope(p, 2, adsr, true)
@@ -565,6 +592,7 @@ export function buildWavPatch(
     waves,
     sub,
     dirt: added,
+    glide,
     fm,
     noise: null,
     filterEnvelope,
@@ -680,6 +708,7 @@ function buildNoisePatch(a: SoundAnalysis, { envelope = 'detect', overTime = tru
     waves: [],
     sub: false,
     dirt: { noise: null, drift: null, detune: null, ensemble: false },
+    glide: null,
     fm: null,
     noise: { colour: formatValue(param('noisetype'), type), cutoffHz },
     filterEnvelope,
@@ -736,7 +765,7 @@ function route(p: Patch, n: number, source: number, key: string, depth: number) 
  * filter envelope, vibrato on the Mod Wheel", or with FM "Play C4: Mutant FM 3:1, its depth
  * moving, ..."; a recording that isn't one clear note says so: "(noisy: a rough start)".
  */
-export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 'noise' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
+export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 'glide' | 'noise' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
   const name = (wave: number) => WAVE_FEATURES[wave]?.name ?? `Wave ${wave}`
   // The waves in the order they play, each once in a row; past three, the first and the last.
   const order = w.waves.filter((v, i) => v !== w.waves[i - 1]).map(name)
@@ -749,6 +778,7 @@ export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 
   const parts = w.fm
     ? [`Mutant FM ${w.fm.ratio}:1${w.fm.envelope ? ', its depth moving' : ''}`]
     : [`${scan.join(' → ')}${w.waves.length > 1 ? ' by WaveScan' : ''}${w.sub ? ' over a Sine' : ''}`]
+  if (w.glide) parts.push(`pitch ${w.glide > 0 ? 'dropping' : 'rising'} ${Math.abs(w.glide)} semitones into it`)
   if (w.filterEnvelope) parts.push('filter envelope')
   if (w.dirt.detune) parts.push(`OSC 3 ${w.dirt.detune} cents apart`)
   if (w.dirt.ensemble) parts.push('ensemble')

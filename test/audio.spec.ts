@@ -252,3 +252,42 @@ describe('dirt', () => {
   })
 })
 
+describe('glide', () => {
+  /** A sine whose pitch follows `hz(t)`, its level `level(t)`. */
+  const sweep = (hz: (t: number) => number, seconds: number, level: (t: number) => number = () => 0.5) => {
+    let phase = 0
+    return Float32Array.from({ length: Math.round(seconds * RATE) }, (_, i) => {
+      const v = level(i / RATE) * Math.sin(phase)
+      phase += (2 * Math.PI * hz(i / RATE)) / RATE
+      return v
+    })
+  }
+
+  it('hears a kick drop into its note', () => {
+    // 100 Hz falling to 50 Hz, exponentially (30 ms), as the level decays.
+    const a = analyse({ samples: sweep((t) => 50 + 50 * Math.exp(-t / 0.03), 0.6, (t) => 0.8 * Math.exp(-t / 0.2)), sampleRate: RATE })
+    expect(a.glide).not.toBeNull()
+    // From its first period or so (100 Hz at the onset, 92 a period on).
+    expect(a.glide!.semitones).toBeGreaterThan(7)
+    expect(a.glide!.semitones).toBeLessThan(13)
+    expect(a.glide!.halfS).toBeLessThan(0.05)
+    expect(Math.abs(cents(a.f0, 50))).toBeLessThan(30)
+  })
+
+  it('hears a slide up into its note', () => {
+    const a = analyse({ samples: sweep((t) => (t < 0.3 ? 200 + (100 * t) / 0.3 : 300), 1), sampleRate: RATE })
+    expect(a.glide).not.toBeNull()
+    expect(a.glide!.semitones).toBeLessThan(-5)
+    expect(a.glide!.semitones).toBeGreaterThan(-8)
+    expect(Math.abs(cents(a.f0, 300))).toBeLessThan(20)
+  })
+
+  it('takes neither vibrato, a noisy attack nor a steady note for a glide', () => {
+    expect(analyse({ samples: tone(220, sawAmps(220), 1.5, { cents: (t) => 40 * Math.sin(2 * Math.PI * 5 * t) }), sampleRate: RATE }).glide).toBeNull()
+    const attack = noise(0.02)
+    const noisy = tone(220, sawAmps(220), 1).map((v, i) => v + (attack[i] ?? 0) * 3)
+    expect(analyse({ samples: noisy, sampleRate: RATE }).glide).toBeNull()
+    expect(analyse({ samples: tone(110, sawAmps(110), 1), sampleRate: RATE }).glide).toBeNull()
+  })
+})
+

@@ -3,7 +3,7 @@
 // sustain, release) and any vibrato or tremolo. Pure: samples in, numbers out.
 import { centroidTrack, octaveBands } from './bands'
 import { type Dirt, measureDirt } from './dirt'
-import { detectPeriod, noteOf, periodNear, refinePeriod } from './pitch'
+import { crossingPeriods, detectPeriod, followPitch, noteOf, periodNear, refinePeriod } from './pitch'
 import { harmonicCount, harmonicsAt, type Harmonics } from './spectrum'
 import type { Audio } from './wav'
 
@@ -56,6 +56,11 @@ export interface SoundAnalysis {
   adsr: Adsr
   vibrato: Wobble | null
   tremolo: Wobble | null
+  /**
+   * A pitch that drops or slides into the note (`semitones` above it at the onset, negative from
+   * under it), half the way there after `halfS`, nine tenths after `tenthS` (seconds from the onset).
+   */
+  glide: { semitones: number; halfS: number; tenthS: number } | null
   /** Drift, detune, chorus and noise: what makes it less clean than a wave played still. */
   dirt: Dirt
   /** Why the result may not be close, for the status line. */
@@ -98,10 +103,28 @@ export function analyse(audio: Audio): SoundAnalysis {
   // No repeat at all (a hi-hat, a crash): middle C stands in, and the note's clarity says 0.
   const found = detectPeriod(x, sr, from, to)
   const coarse = found.period ? found : { period: sr / NO_NOTE_HZ, clarity: 0 }
-  const period = found.period ? refinePeriod(x, sr, coarse.period, from, to) : coarse.period
-  const f0 = sr / period
-  const { midi, cents } = noteOf(f0)
+  const steady = found.period ? refinePeriod(x, sr, coarse.period, from, to) : coarse.period
   if (coarse.clarity < 0.8) warnings.push('no clear single note')
+  // A pitch that drops or slides into place (a kick, a tom, a zap, a slide): the note is where it
+  // settles, and the timbre is read at the pitch it has at each moment.
+  // Zero crossings measure the pitch only of a sound that's mostly its fundamental (a kick, a tom):
+  // the other harmonics together under half of it, or they cross zero too.
+  const body = harmonicsAt(x, sr, sr / steady, from, Math.min(x.length, from + Math.max(4 * steady, 0.04 * sr)), 8).amps
+  const sineLike = body.slice(1).reduce((sum, v) => sum + v, 0) < 0.5 * body[0]
+  const glide =
+    coarse.clarity >= 0.5
+      ? glideOf(
+          followPitch(x, sr, steady, from, at(first.onset), at(first.iEnd)),
+          sineLike ? crossingPeriods(x, sr, at(first.onset), Math.min(at(first.iEnd), at(first.onset) + Math.round(0.3 * sr)), (3 * sr) / steady) : [],
+          steady,
+          at(first.onset) / sr,
+          sr,
+        )
+      : null
+  const period = glide ? sr / glide.settledHz : steady
+  const f0 = sr / period
+  const f0At = (sample: number) => (glide ? glide.hzAt(sample / sr) : f0)
+  const { midi, cents } = noteOf(f0)
   const { rel, peak, ip, onset, iEnd, held } = levelCurve(x, hop, Math.max(hop, Math.round(period)))
   if ((iEnd - onset) * HOP_S < 0.1) warnings.push('very short')
 
@@ -111,7 +134,7 @@ export function analyse(audio: Audio): SoundAnalysis {
   const length = Math.max(8 * period, Math.min(0.1 * sr, 0.4 * (at(iEnd) - at(ip))))
   let start = at(ip)
   if (start + length > x.length) start = Math.max(0, x.length - length)
-  const spectrum = harmonicsAt(x, sr, f0, start, start + length, count)
+  const spectrum = harmonicsAt(x, sr, f0At(start + length / 2), start, start + length, harmonicCount(f0At(start + length / 2), sr))
   if (spectrum.share < 0.5) warnings.push('inharmonic or noisy')
   // Nothing in the first three harmonics, yet a repeat: notes a chord apart (A C# E repeat as 4:5:6).
   else if (coarse.clarity >= 0.8 && spectrum.levels.length > 3 && Math.max(...spectrum.levels.slice(0, 3)) < -20) warnings.push('no clear single note')
@@ -126,13 +149,14 @@ export function analyse(audio: Audio): SoundAnalysis {
     const a = Math.max(0, Math.round(t - window / 2))
     const b = Math.min(x.length, a + window)
     if (b - a < 4 * period) continue
-    frames.push({ t: t / sr, db: rel[Math.min(rel.length - 1, Math.round(t / hop))], harmonics: harmonicsAt(x, sr, f0, a, b, count) })
+    frames.push({ t: t / sr, db: rel[Math.min(rel.length - 1, Math.round(t / hop))], harmonics: harmonicsAt(x, sr, f0At(t), a, b, harmonicCount(f0At(t), sr)) })
   }
 
   // Vibrato and tremolo, over the body of the note (past the peak, above -24 dB).
   let bodyEnd = ip
   while (bodyEnd < iEnd && rel[bodyEnd + 1] >= -24) bodyEnd++
-  const bodyFrom = at(ip) + Math.round(0.05 * sr)
+  // Past where a glide settles: its slide would read as vibrato, drift or chorus.
+  const bodyFrom = Math.max(at(ip) + Math.round(0.05 * sr), glide ? Math.round(glide.settledS * sr) : 0)
   const bodyTo = Math.min(at(bodyEnd), bodyFrom + 4 * sr)
   const pitchTrack: number[] = []
   const levelTrack: number[] = []
@@ -160,6 +184,7 @@ export function analyse(audio: Audio): SoundAnalysis {
     peakS: at(ip) / sr,
     endS: at(iEnd) / sr,
     held,
+    glide: glide && { semitones: glide.semitones, halfS: glide.halfS, tenthS: glide.tenthS },
     spectrum,
     bands: octaveBands(x, sr, at(ip)),
     brightness: centroidTrack(x, sr, at(onset), Math.min(at(iEnd), at(onset) + MAX_FRAMES_S * sr)),
@@ -171,6 +196,57 @@ export function analyse(audio: Audio): SoundAnalysis {
     dirt: measureDirt(x, sr, f0, spectrum.amps, bodyFrom, bodyTo, vibrato?.rateHz ?? null),
     warnings,
   }
+}
+
+/**
+ * A glide into the note (where the followed pitch `track` settles; its steady `period`, as read past
+ * the peak, for a note too short to settle) in `track`:
+ * how far from it the note starts (from the first clear steps, within 60 ms of the onset; where
+ * the follower found nothing in the first 20 ms, `crossings` fill in), and when it gets half and nine
+ * tenths of the way. Null under a semitone (vibrato, a wobble), with nothing clear at the start,
+ * or for two notes (one held, then a jump to the next, or the follower slipping).
+ */
+function glideOf(track: { t: number; period: number }[], crossings: { t: number; period: number }[], period: number, onsetS: number, sampleRate: number) {
+  let clear = track.filter((s) => Number.isFinite(s.period))
+  if (!clear.length || clear[0].t > onsetS + 0.02)
+    clear = [...crossings.filter((c) => c.t < (clear[0]?.t ?? Infinity) && c.period > period / 4 && c.period < period * 1.5), ...clear]
+  if (clear.length < 4) return null
+  // Where it settles: the last stretch of 0.15 s or more within a third of a semitone (a slide's end,
+  // not the middle of it where its level peaked); for a note too short to hold that long, `period`.
+  for (let end = clear.length - 1, i = end; i >= 0; i--) {
+    if (Math.abs(12 * Math.log2(clear[i].period / clear[end].period)) > 0.33) end = i
+    else if (clear[end].t - clear[i].t >= 0.15) {
+      const stretch = clear.slice(i, end + 1).map((s) => s.period).sort((a, b) => a - b)
+      period = stretch[Math.floor(stretch.length / 2)]
+      break
+    }
+  }
+  const semis = clear.map((s) => ({ t: s.t, st: 12 * Math.log2(period / s.period) }))
+  const head = semis.slice(0, 3)
+  if (head[0].t > onsetS + 0.06) return null
+  // The first reading, if the next is already on its way from it to the note (a kick is half way
+  // down within a few periods); else the middle of the first three, steadier.
+  const first = head[0].st
+  const start = head.length > 1 && Math.sign(head[1].st) === Math.sign(first) && Math.abs(head[1].st) < Math.abs(first) ? first : head.map((s) => s.st).sort((a, b) => a - b)[1]
+  // Still on its way at the second reading: one stray first reading isn't a glide.
+  if (Math.abs(start) < 1 || Math.abs(start) > 24 || head.length < 2 || Math.sign(head[1].st) !== Math.sign(start) || Math.abs(head[1].st) < 1) return null
+  const after = (share: number) => (semis.find((s) => s.t > head[0].t && Math.abs(s.st) <= share * Math.abs(start)) ?? semis[semis.length - 1]).t - onsetS
+  const halfS = after(0.5)
+  const tenthS = after(0.1)
+  // Two notes, not a glide: the first held a while (15 ms within a semitone), then one jump more
+  // than half the way. A kick drops most of the way in a period, but never holds first; a slow
+  // slide holds, but never jumps.
+  const holds = semis.filter((s) => s.t <= head[0].t + 0.015).every((s) => Math.abs(s.st - start) < 1) && semis.some((s) => s.t > head[0].t + 0.015)
+  const jumps = semis.some((s, i) => i > 0 && Math.abs(s.st - semis[i - 1].st) > 0.5 * Math.abs(start))
+  if (holds && jumps) return null
+  const periodAt = (t: number) => {
+    if (t >= onsetS + tenthS) return period
+    const i = clear.findIndex((s) => s.t >= t)
+    if (i <= 0) return clear[Math.max(0, i)].period
+    const [a, b] = [clear[i - 1], clear[i]]
+    return a.period + ((b.period - a.period) * (t - a.t)) / (b.t - a.t)
+  }
+  return { semitones: start, halfS, tenthS, settledS: onsetS + tenthS, settledHz: sampleRate / period, hzAt: (t: number) => sampleRate / periodAt(t) }
 }
 
 /**
