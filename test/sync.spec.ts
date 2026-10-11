@@ -93,6 +93,21 @@ describe('PatchSync', () => {
     expect(synth.channelMessages.slice(-2)).toEqual([[0xc0, 0], [0xc0, 4]])
   })
 
+  it('drops edits made while a slot is loading, so none reach the new patch', async () => {
+    const { synth, sync } = setup()
+    await settle(sync.open({ bank: 0, patch: 0 }))
+    const before = sync.get().patch!.get('filter1cutoff')
+    const opening = sync.open({ bank: 0, patch: 4 })
+    sync.set('filter1cutoff', before === 700 ? 600 : 700)
+    sync.setName('Typed meanwhile')
+    await settle(opening)
+    await settle(sync.settled())
+    expect(synth.nrpns()).toEqual([])
+    expect(sync.get().patch!.get('filter1cutoff')).toBe(before)
+    expect(sync.get().patch!.name).toBe('Sawpressive GD')
+    expect(sync.get().dirty).toBe(false)
+  })
+
   it('sends a live param as one NRPN, no whole-patch send', async () => {
     const { synth, sync } = setup()
     await settle(sync.open({ bank: 0, patch: 0 }))

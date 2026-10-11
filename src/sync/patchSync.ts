@@ -86,6 +86,8 @@ export class PatchSync {
   /** The bytes as last opened or written: "dirty" means differing from them (null: always dirty). */
   private baseline: Uint8Array | null = null
   private readonly queue: NrpnQueue
+  /** While open() downloads a slot: editor edits are dropped. */
+  private opening = false
   private channel: number
 
   private readonly stopListening: () => void
@@ -125,13 +127,22 @@ export class PatchSync {
     this.channel = channel
   }
 
-  /** Loads a stored slot on the synth and downloads it for editing. */
+  /**
+   * Loads a stored slot on the synth and downloads it for editing. Edits made meanwhile are
+   * dropped: they'd change the patch being replaced and reach the synth as edits of the new one.
+   */
   async open(slot: Slot) {
     await this.task(`Loading ${slotName(slot)}`, async () => {
       this.cancelFullSend()
       this.queue.clear()
-      const bytes = await this.options.session.downloadPatch(slot.bank, slot.patch)
-      await this.options.session.reloadSlot(this.channel, slot.bank, slot.patch)
+      this.opening = true
+      let bytes: Uint8Array
+      try {
+        bytes = await this.options.session.downloadPatch(slot.bank, slot.patch)
+        await this.options.session.reloadSlot(this.channel, slot.bank, slot.patch)
+      } finally {
+        this.opening = false
+      }
       this.inactiveValues.clear()
       this.history.reset()
       this.baseline = new Uint8Array(bytes)
@@ -187,6 +198,7 @@ export class PatchSync {
   }
 
   private apply(key: string, value: number, from: 'editor' | 'synth') {
+    if (this.opening && from === 'editor') return
     const patch = this.requirePatch()
     const def = param(key)
     if (patch.get(key) === Math.max(def.min, Math.min(def.max, Math.round(value)))) return
@@ -227,6 +239,7 @@ export class PatchSync {
   }
 
   setName(name: string) {
+    if (this.opening) return
     const patch = this.requirePatch()
     if (patch.name === name) return
     this.history.record(() => this.snapshot(), 'name', 'Patch name')
@@ -236,6 +249,7 @@ export class PatchSync {
   }
 
   setMacroName(macro: number, name: string) {
+    if (this.opening) return
     const patch = this.requirePatch()
     if (patch.macroName(macro) === name) return
     this.history.record(() => this.snapshot(), `macro${macro}name`, `Macro ${macro} name`)
@@ -258,11 +272,13 @@ export class PatchSync {
   }
 
   undo() {
+    if (this.opening) return
     const snap = this.state.patch && this.history.undo(this.snapshot())
     if (snap) this.restore(snap)
   }
 
   redo() {
+    if (this.opening) return
     const snap = this.state.patch && this.history.redo(this.snapshot())
     if (snap) this.restore(snap)
   }
