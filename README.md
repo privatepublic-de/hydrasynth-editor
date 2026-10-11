@@ -4,10 +4,12 @@ A patch editor for the ASM Hydrasynth (Desktop first), over USB MIDI.
 
 ## Running it
 
-The editor is published with GitHub Pages (the link is in this repository's About box):
-open it in Chrome, Edge or Firefox (Safari has no Web MIDI), allow MIDI access, click
-Connect. Nothing to install; everything runs in the browser, see the
-[privacy statement](public/privacy.html). Add `?demo` to the address to try it without a synth.
+**Open the editor: https://privatepublic-de.github.io/hydrasynth-editor/**
+(or [try the demo](https://privatepublic-de.github.io/hydrasynth-editor/?demo), without a synth)
+
+Use Chrome, Edge or Firefox (Safari has no Web MIDI), allow MIDI access, click Connect.
+Nothing to install; everything runs in the browser, see the
+[privacy statement](https://privatepublic-de.github.io/hydrasynth-editor/privacy.html).
 
 ### Offline, from your own computer
 
