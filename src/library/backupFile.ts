@@ -2,7 +2,7 @@
 // (F0 00 20 2B 00 6F <base64> F7), one after another. Other tools that read Hydrasynth patch
 // dumps can read the file too; restore reads it back with decodeBackup.
 import { decodeMessage, encodeMessage, isHydrasynthSysex } from '../sysex/codec'
-import { CHUNK_KIND, PATCH_BYTES, PATCH_CHUNK_COUNT, chunkMessage, parseChunk, patchChunks } from '../sysex/protocol'
+import { BANK_LETTERS, CHUNK_KIND, PATCHES_PER_BANK, PATCH_BYTES, PATCH_CHUNK_COUNT, chunkMessage, parseChunk, patchChunks } from '../sysex/protocol'
 
 export interface StoredPatch {
   bank: number
@@ -53,7 +53,11 @@ export function decodeBackup(file: Uint8Array): StoredPatch[] {
         at += p.length
       }
       if (bytes.length !== PATCH_BYTES) throw new BackupFileError(`patch ${patches.length + 1} is ${bytes.length} bytes, not ${PATCH_BYTES}`)
-      patches.push({ bank: bytes[2], patch: bytes[3], bytes })
+      // Bytes 2-3 name the slot; restore offers it as the target, so it must be a real one.
+      const [bank, patch] = [bytes[2], bytes[3]]
+      if (bank >= BANK_LETTERS.length || patch >= PATCHES_PER_BANK)
+        throw new BackupFileError(`patch ${patches.length + 1} names a slot the synth doesn\u2019t have (bank ${bank}, patch ${patch})`)
+      patches.push({ bank, patch, bytes })
       parts = []
     }
   }

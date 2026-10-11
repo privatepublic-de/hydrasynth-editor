@@ -41,6 +41,14 @@ describe('backup file', () => {
     expect(() => decodeBackup(bad)).toThrow(/checksum/)
   })
 
+  it('refuses a patch that names a slot the synth doesn\u2019t have', () => {
+    for (const [at, value] of [[2, 8], [3, 128]]) {
+      const bytes = fixtureBytes()
+      bytes[at] = value
+      expect(() => decodeBackup(encodeBackup([{ bank: 0, patch: 0, bytes }]))).toThrow(/slot the synth/)
+    }
+  })
+
   it('names files by date', () => {
     expect(backupFileName(new Date(2026, 9, 8, 15, 30))).toBe('hydrasynth-backup-2026-10-08-1530.syx')
   })
