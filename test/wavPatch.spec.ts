@@ -167,8 +167,11 @@ describe('buildWavPatch', () => {
     const w = buildWavPatch(saw, { levels })
     expect(w.macros).toEqual(['Bright', 'Resonance', 'Attack', 'Release', 'Dirt'])
     expect(show(w.patch, 'macro5target1')).toBe('Filt 1 Drive')
-    expect(w.patch.get('macro5panelvalue')).toBe(0)
-    expect(show(w.patch, 'filter1drive')).toBe('0.0')
+    // Some Post drive to start with, a quarter up the knob: from none to four times as much.
+    expect(w.patch.get('macro5panelvalue')).toBe(256)
+    expect(w.patch.get('filter1drive')).toBe(0)
+    expect(w.patch.get('macro5depth1')).toBe(512 + 512)
+    expect(show(w.patch, 'filter1positionofdrive')).toBe('Post')
     expect(w.patch.macroName(1)).toBe('Bright')
     expect(show(w.patch, 'macro1target1')).toBe('Filt 1 Cutoff')
     expect(show(w.patch, 'macro3target1')).toBe('Env 2 Attack')

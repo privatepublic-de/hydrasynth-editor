@@ -25,7 +25,7 @@
 //              a string machine's ensemble on the two FX: a Chorus at 0.6 Hz before, one at 6 Hz after
 //   Macros     1 Bright (Filt 1 Cutoff), 2 Timbre (FM Depth, WaveScan, or Resonance on one wave),
 //              3 Attack and 4 Release (ENV 2), Movement (how far ENV 1 or 3 moves things) and Dirt
-//              (Filter 1 Drive after the filter, from none: a recording's saturation is in its harmonics already), each
+//              (Filter 1 Drive after the filter, a quarter up: some grit a clean fit lacks), each
 //              knob in its middle (or at an end) where the patch is as generated: a starting point
 //   Playing    velocity scales the Amp envelope and opens the filter (ENV 1's amount, or route 3
 //              to Filt 1 Cutoff); aftertouch, channel or poly (routes 4 and 5), opens it further
@@ -459,6 +459,9 @@ function envelopeOfTrack(times: number[], raw: number[], startS: number, least: 
   const decayS = fall > 0 && half > 0 ? 2 * (times[half] - times[held]) : 0
   return { track, base, span, attackS: times[top] - startS, holdS: times[held] - times[top], decayS, sustain: (end - base) / span }
 }
+
+/** Filter 1 Drive (Post) a generated patch starts with: a quarter of the Dirt knob. */
+const DRIVE = 256
 
 /** A vibrato this deep (cents) is one, even where an ensemble plays: its sweep reads shallower. */
 const ENSEMBLE_VIBRATO_CENTS = 16
@@ -1026,7 +1029,7 @@ function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: strin
 
   // Macros: each knob starts where the patch as generated is.
   const macros: string[] = []
-  const knob = (key: string, name: string, span: number, from: 'middle' | 'bottom' = 'middle') =>
+  const knob = (key: string, name: string, span: number, from: 'middle' | 'quarter' | 'bottom' = 'middle') =>
     macros.push(setMacro(p, macros.length + 1, name, key, span, from))
   knob('filter1cutoff', 'Bright', 384)
   knob(...timbre)
@@ -1034,8 +1037,11 @@ function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: strin
   knob('env2releasesyncoff', 'Release', 384)
   // Drive after the filter: before it, it fattens the low harmonics and the top falls behind
   // (Drive 768 took a VP-330 pad 12 dB down over 4-10 kHz); after it, it adds grit (heard 512-768).
+  // A little of it to start with (the user's pick by ear: the recordings' grit is more than a clean
+  // fit plays), the knob a quarter up: down to none, up to all of it.
   p.set('filter1positionofdrive', 1) // Post
-  knob('filter1drive', 'Dirt', 768, 'bottom')
+  p.set('filter1drive', DRIVE)
+  knob('filter1drive', 'Dirt', 4 * DRIVE, 'quarter')
   // Movement: none at the knob's bottom, as generated in its middle, twice as much at the top.
   // (An LFO's Level runs from 0, the others from 512.)
   if (moving) knob(moving, 'Movement', 2 * Math.min(512, p.get(moving) - (moving.startsWith('lfo') ? 0 : 512)))
@@ -1154,16 +1160,18 @@ function envAmount(span: number): number {
 
 /**
  * Macro `n`, named `name`, on `key`: the knob moves it over `span` raw (a macro at depth d moves its
- * target d * 8 raw over the knob, a Matrix Depth too), set where it is now: in its middle, else
- * (`from` 'bottom', or no room either side) at the bottom or top. Only there does the knob land on
+ * target d * 8 raw over the knob, a Matrix Depth too), set where it is now: in its middle (or a
+ * quarter of the way up, `from` 'quarter'), else (`from` 'bottom', or no room) at the bottom or top.
+ * Only there does the knob land on
  * the value exactly: a WaveScan route an eighth of a step short of its last wave keeps 2 % of the
  * one before it, and that's heard. Returns the name.
  */
-function setMacro(p: Patch, n: number, name: string, key: string, span: number, from: 'middle' | 'bottom'): string {
+function setMacro(p: Patch, n: number, name: string, key: string, span: number, from: 'middle' | 'quarter' | 'bottom'): string {
   const v = p.get(key)
   span = 2 * Math.round(span / 2) // the macro's depth (raw 512 + span / 2) stays whole
   let knob = 0
   if (from === 'middle' && v - span / 2 >= 0 && v + span / 2 <= 1024) knob = 512
+  else if (from === 'quarter' && v - span / 4 >= 0 && v + (3 * span) / 4 <= 1024) knob = 256
   else if (v + span > 1024) {
     // From the top: the knob's range ends at the value, so it may reach no further down than 0.
     knob = 1024
