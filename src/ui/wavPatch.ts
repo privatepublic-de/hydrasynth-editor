@@ -25,7 +25,7 @@
 //              a string machine's ensemble on the two FX: a Chorus at 0.6 Hz before, one at 6 Hz after
 //   Macros     1 Bright (Filt 1 Cutoff), 2 Timbre (FM Depth, WaveScan, or Resonance on one wave),
 //              3 Attack and 4 Release (ENV 2), Movement (how far ENV 1 or 3 moves things) and Dirt
-//              (Filter 1 Drive, from none: a recording's saturation is in its harmonics already), each
+//              (Filter 1 Drive after the filter, from none: a recording's saturation is in its harmonics already), each
 //              knob in its middle (or at an end) where the patch is as generated: a starting point
 //   Playing    velocity scales the Amp envelope and opens the filter (ENV 1's amount, or route 3
 //              to Filt 1 Cutoff); aftertouch, channel or poly (routes 4 and 5), opens it further
@@ -1032,7 +1032,10 @@ function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: strin
   knob(...timbre)
   knob('env2attacksyncoff', 'Attack', 384)
   knob('env2releasesyncoff', 'Release', 384)
-  knob('filter1drive', 'Dirt', 512, 'bottom')
+  // Drive after the filter: before it, it fattens the low harmonics and the top falls behind
+  // (Drive 768 took a VP-330 pad 12 dB down over 4-10 kHz); after it, it adds grit (heard 512-768).
+  p.set('filter1positionofdrive', 1) // Post
+  knob('filter1drive', 'Dirt', 768, 'bottom')
   // Movement: none at the knob's bottom, as generated in its middle, twice as much at the top.
   // (An LFO's Level runs from 0, the others from 512.)
   if (moving) knob(moving, 'Movement', 2 * Math.min(512, p.get(moving) - (moving.startsWith('lfo') ? 0 : 512)))
