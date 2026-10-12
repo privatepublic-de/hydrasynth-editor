@@ -19,6 +19,8 @@
 //   LFO 2      tremolo found in the note (the Amp's own LFO 2 Amount)
 //   ENV 4      a pitch that drops or slides into the note (a kick, a tom, a zap): route 7 to All Osc
 //              Pitch, its Decay and curve shaped like the drop
+//   Tine       an FM tine (a DX piano's bright start, src/audio/tine.ts): OSC 2 a Sine through Mutant 3
+//              at its ratio, ENV 5 fading Osc 2 Vol and the FM Depth out (routes 12 and 13)
 //   Dirt       as recorded (src/audio/dirt.ts): noise between the harmonics on the noise source in
 //              the nearest colour through Filter 1, a little under the recording's, on a Noise macro; a pitch that wanders on a Random LFO 3 (route 6, All Osc Pitch);
 //              a second voice some cents off on OSC 3, the same wave, OSC 1 as far the other way;
@@ -97,6 +99,12 @@ export const CALIBRATION = {
    * half the depth, both Feedback 0 and the same wet; what src/audio/dirt.ts reads of each (ensemble,
    * two takes each; recordings read 5-13 cents, beating 5-6 dB).
    */
+  /**
+   * The FM tine (OSC 2 Sine through Mutant 3, ENV 5 on Osc 2 Vol and Mut 3 Depth from 0): at Osc 2
+   * Vol 724 and Depth 384, Decay 300 ms, src/audio/tine.ts read star piano's ratio 7 at -9.7 dB
+   * fading 20 dB in 160 ms (the recording: -11.9 dB, 200 ms). By ear the closest of five.
+   */
+  tine: { volume: 724, readDb: -9.7, depth: 384, decayPerFade: 0.3 / 0.16 },
   ensemble: [
     { depth: 512, wet: 512, cents: 3.4 },
     { depth: 512, wet: 640, cents: 5.6 },
@@ -190,6 +198,8 @@ export interface WavPatch {
   resonance: number
   /** A pitch that drops (or rises, negative) this many semitones into the note, on ENV 4. */
   glide: number | null
+  /** An FM tine on OSC 2 (a Sine through Mutant 3 at this ratio, faded out by ENV 5), or null. */
+  tine: { ratio: number } | null
   /** Mutant FM instead: its Ratio, Depth (raw) and whether ENV 3 moves the Depth. */
   fm: { ratio: number; depth: number; envelope: boolean } | null
   filterEnvelope: boolean
@@ -986,10 +996,35 @@ export function buildWavPatch(
   const scanByEnvelope = waves.length > 1 && !swingTimbre
   const timbre: Timbre = fm || pulse ? ['mutant1depth', 'Timbre', 384, 'middle'] : scanByEnvelope ? ['osc1wavscan', 'Timbre', 512, 'bottom'] : RESONANCE
   const moving = lfo4 !== null ? 'lfo4level' : filterEnvelope ? 'filter1env1amount' : fm?.envelope || scanByEnvelope ? 'modmatrix1depth' : null
+  // An FM tine: OSC 2 a Sine through Mutant 3 (OSC 2 runs through Mutants 3 and 4) at the ratio
+  // the tine's series is spaced at, ENV 5 fading its level and the FM Depth out together (heard
+  // closest by ear); as loud and as long as the recording's, as the synth's own tine reads.
+  let tine: WavPatch['tine'] = null
+  if (a.tine && !second && !sub) {
+    const { volume, readDb, depth, decayPerFade } = CALIBRATION.tine
+    const amplitude = Math.min(1, (volume / 1024) ** 2 * 10 ** ((a.tine.db - readDb) / 20))
+    p.set('osc2type', SINE)
+    p.set('osc2semi', 0)
+    p.set('osc2cent', 0)
+    p.set('mixerosc2vol', 0)
+    // Into Filter 2 alone, past Filter 1 (in series): its cutoff and sweep, set for the body, cut the
+    // tine's partials (2-8 kHz) by a different amount on every note.
+    p.set('mixerosc2filterratio', 1024) // 0:100
+    p.set('mutant3mode', 0) // FM-Linear
+    p.set('mutant3sourcefmlin', 0) // Sine
+    p.set('mutant3ratio', FM_RATIOS.reduce((x, r) => (Math.abs(r.ratio - a.tine!.ratio) < Math.abs(x.ratio - a.tine!.ratio) ? r : x)).raw)
+    p.set('mutant3wet', 1024)
+    p.set('mutant3depth', 0)
+    setEnvelope(p, 5, { attackS: 0, decayS: a.tine.fadeS * decayPerFade, sustain: 0, releaseS: 0.05 }, false)
+    route(p, 12, 5 /* Env 5 */, 'mixerosc2vol', (1024 * Math.sqrt(amplitude)) / CALIBRATION.routeRawPerDepth)
+    route(p, 13, 5 /* Env 5 */, 'mutant3depth', depth / CALIBRATION.routeRawPerDepth)
+    tine = { ratio: a.tine.ratio }
+  }
+
   // Unison, as an option on a macro: OSC 2 and 3 copies of the wave, UNISON.cents either side,
   // faded in by the knob from none (the patch as generated). Only where both are free and OSC 1
   // plays one wave as it is (no WaveScan, FM or pulse width the copies wouldn't follow).
-  const unison = !second && !sub && !added.detune && !voices && !fm && !pulse && waves.length === 1
+  const unison = !second && !sub && !tine && !added.detune && !voices && !fm && !pulse && waves.length === 1
   if (unison) {
     for (const [n, cents] of [[2, UNISON.cents], [3, -UNISON.cents]]) {
       p.set(`osc${n}type`, waves[0])
@@ -1011,6 +1046,7 @@ export function buildWavPatch(
     dirt: added,
     resonance,
     glide,
+    tine,
     fm,
     noise: null,
     filterEnvelope,
@@ -1151,6 +1187,7 @@ function buildNoisePatch(a: SoundAnalysis, { envelope = 'detect', overTime = tru
     dirt: { noise: null, drift: null, detune: null, ensemble: false },
     resonance: 0,
     glide: null,
+    tine: null,
     fm: null,
     noise: { colour: formatValue(param('noisetype'), type), cutoffHz },
     filterEnvelope,
@@ -1223,7 +1260,7 @@ function route(p: Patch, n: number, source: number, key: string, depth: number) 
  * filter envelope, vibrato on the Mod Wheel", or with FM "Play C4: Mutant FM 3:1, its depth
  * moving, ..."; a recording that isn't one clear note says so: "(noisy: a rough start)".
  */
-export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'second' | 'swings' | 'voices' | 'dirt' | 'resonance' | 'glide' | 'noise' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
+export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'second' | 'swings' | 'voices' | 'dirt' | 'resonance' | 'glide' | 'tine' | 'noise' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
   const name = (wave: number) => WAVE_FEATURES[wave]?.name ?? `Wave ${wave}`
   // The waves in the order they play, each once in a row; past three, the first and the last.
   const order = w.waves.filter((v, i) => v !== w.waves[i - 1]).map(name)
@@ -1249,6 +1286,7 @@ export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'second' 
   if (w.voices) parts.push(`${w.voices.length} voices ${w.voices.map((c) => `${c > 0 ? '+' : c < 0 ? '−' : ''}${Math.abs(c)}`).join(', ')} cents`)
   parts.push(...w.swings)
   if (w.glide) parts.push(`pitch ${w.glide > 0 ? 'dropping' : 'rising'} ${Math.abs(w.glide)} semitones into it`)
+  if (w.tine) parts.push(`FM tine ${w.tine.ratio}:1 on OSC 2`)
   if (w.resonance) parts.push(w.filterEnvelope ? 'resonant filter envelope' : 'resonant filter')
   else if (w.filterEnvelope) parts.push('filter envelope')
   if (w.dirt.detune) parts.push(`OSC 3 ${w.dirt.detune} cents apart`)

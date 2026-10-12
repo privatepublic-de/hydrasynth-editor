@@ -510,3 +510,31 @@ describe.skipIf(!existsSync('local/wave-recordings/0.wav'))('fitWave on the synt
     expect(found / tried).toBeGreaterThan(0.95)
   }, 20000) // 44 recordings
 })
+
+describe('FM tine', () => {
+  it('plays a DX tine on OSC 2: a Sine through Mutant 3 at its ratio, ENV 5 fading it out', () => {
+    const f0 = 131
+    const body = tone(f0, sawAmps(f0).slice(0, 8), 1)
+    const amps = Array.from({ length: 110 }, (_, k) => ([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].some((n) => Math.abs(k + 1 - 7 * n) === 1) ? 0.04 : 0))
+    const top = tone(f0, amps, 1, { level: (t) => Math.exp(-t / 0.05) })
+    const a = analyse({ samples: body.map((v, i) => v + top[i]), sampleRate: RATE })
+    expect(a.tine?.ratio).toBe(7)
+    const w = buildWavPatch(a, { levels })
+    expect(w.tine).toEqual({ ratio: 7 })
+    expect(wavStatus(w)).toContain('FM tine 7:1 on OSC 2')
+    expect(show(w.patch, 'osc2type')).toBe('Sine')
+    expect(show(w.patch, 'mutant3mode')).toBe('FM-Linear')
+    expect(show(w.patch, 'mutant3ratio')).toContain('7')
+    // Past Filter 1, whose cutoff is set for the body.
+    expect(show(w.patch, 'mixerosc2filterratio')).toBe('0:100')
+    // Silent but for ENV 5, on both its level and the FM Depth, falling to nothing.
+    expect([w.patch.get('mixerosc2vol'), w.patch.get('mutant3depth'), w.patch.get('env5sustain')]).toEqual([0, 0, 0])
+    for (const [slot, target] of [[12, 'Osc 2 Vol'], [13, 'Mut 3 Depth']]) {
+      expect(show(w.patch, `modmatrix${slot}modsource`)).toBe('Env 5')
+      expect(show(w.patch, `modmatrix${slot}modtarget`)).toBe(target)
+      expect(w.patch.get(`modmatrix${slot}depth`)).toBeGreaterThan(512)
+    }
+    // OSC 2 is the tine's: no Unison copies.
+    expect(w.macros).not.toContain('Unison')
+  })
+})

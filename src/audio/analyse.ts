@@ -7,6 +7,7 @@ import { measureMovement, type Movement, octaveApart, offsetNear } from './movem
 import { seriesIn, voicesIn } from './oscillators'
 import { crossingPeriods, detectPeriod, followPitch, noteOf, periodNear, refinePeriod } from './pitch'
 import { harmonicBands, harmonicCount, harmonicsAt, type Harmonics } from './spectrum'
+import { type Tine, tineOf } from './tine'
 import type { Audio } from './wav'
 
 export interface Adsr {
@@ -60,6 +61,8 @@ export interface SoundAnalysis {
    * its brightest for 10-20 ms, which a frame (centred on the onset, 40 ms or more) reads far darker.
    */
   attack: Harmonics
+  /** An FM tine: partials in a series of their own high over the note, fading in a few hundred ms (src/audio/tine.ts). */
+  tine: Tine | null
   adsr: Adsr
   vibrato: Wobble | null
   tremolo: Wobble | null
@@ -251,6 +254,7 @@ export function analyse(audio: Audio): SoundAnalysis {
     bands: octaveBands(x, sr, at(ip)),
     brightness: centroidTrack(x, sr, at(onset), Math.min(at(iEnd), at(onset) + MAX_FRAMES_S * sr)),
     frames,
+    tine: glide ? null : tineOf(x, sr, f0, at(onset)),
     attack: harmonicsAt(x, sr, f0At(at(onset)), at(onset), Math.min(x.length, at(onset) + ATTACK_PERIODS * (sr / f0At(at(onset)))), harmonicCount(f0At(at(onset)), sr)),
     // The attack on the finer curve: two periods of a low note would smear a fast one.
     adsr,

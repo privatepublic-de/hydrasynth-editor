@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { analyse, wobble } from '../src/audio/analyse'
 import { detectPeriod, noteName, noteOf } from '../src/audio/pitch'
 import { harmonicsAt } from '../src/audio/spectrum'
+import { tineOf } from '../src/audio/tine'
 import { parseWav } from '../src/audio/wav'
 import { ensemble, noise, RATE, sawAmps, tone, wavBytes } from './signals'
 
@@ -377,5 +378,39 @@ describe('pads', { timeout: 30000 }, () => {
     const swinging = tone(130.81, sawAmps(130.81), 6, { level: (t) => 0.5 * 10 ** (sine(0.5, 3)(t) / 20) * (t > 5.5 ? Math.max(0, 1 - (t - 5.5) / 0.2) : 1) })
     expect(at(swinging).adsr.sustain).toBeGreaterThan(0.5)
     expect(at(tone(130.81, sawAmps(130.81), 6, { level: (t) => Math.exp(-t / 1.5) * 10 ** (sine(0.6, 2)(t) / 20) })).movement).toBeNull()
+  })
+})
+
+describe('tine', () => {
+  const f0 = 131
+  /** A soft body (the first 8 harmonics of a saw, held) and upper harmonics `upper` (k, amplitude) fading in `fadeS`. */
+  const note = (upper: [number, number][], fadeS: number) => {
+    const body = tone(f0, sawAmps(f0).slice(0, 8), 1)
+    const amps = Array.from({ length: 110 }, (_, k) => upper.find(([n]) => n === k + 1)?.[1] ?? 0)
+    const top = tone(f0, amps, 1, { level: (t) => Math.exp(-t / fadeS) })
+    return body.map((v, i) => v + top[i])
+  }
+  const sidebands = (ratio: number) => Array.from({ length: 12 }, (_, n) => n + 2).flatMap((n) => [[n * ratio - 1, 0.04], [n * ratio + 1, 0.04]] as [number, number][])
+
+  it('hears a DX tine: sidebands either side of 7 x the note, fading fast', () => {
+    const tine = tineOf(note(sidebands(7), 0.05), RATE, f0, 0)
+    expect(tine).not.toBeNull()
+    expect(tine!.ratio).toBe(7)
+    expect(tine!.fadeS).toBeGreaterThan(0.05)
+    expect(tine!.fadeS).toBeLessThan(0.25)
+  })
+
+  it('takes no closing filter for one: every upper harmonic fading', () => {
+    const all = Array.from({ length: 100 }, (_, k) => [k + 9, 0.5 / (k + 9)] as [number, number])
+    expect(tineOf(note(all, 0.05), RATE, f0, 0)).toBeNull()
+  })
+
+  it('nor a pulse wave’s, every third harmonic missing', () => {
+    const pulse = Array.from({ length: 100 }, (_, k) => k + 9).filter((k) => k % 3).map((k) => [k, 0.5 / k] as [number, number])
+    expect(tineOf(note(pulse, 0.05), RATE, f0, 0)).toBeNull()
+  })
+
+  it('nor sidebands that stay', () => {
+    expect(tineOf(note(sidebands(7), 5), RATE, f0, 0)).toBeNull()
   })
 })
