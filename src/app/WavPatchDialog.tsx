@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { analyse, type SoundAnalysis } from '../audio/analyse'
-import { parseWav } from '../audio/wav'
+import { parseWav, type Audio } from '../audio/wav'
 import { WAVE_FEATURES } from '../ui/waveFeatures.generated'
 import { waveLevels, wavePeaks } from '../ui/waveSpeech'
 import { buildWavPatch, ENVELOPES, SOURCES, wavStatus } from '../ui/wavPatch'
@@ -16,7 +16,7 @@ const readChoices = (v: Record<string, unknown>) => ({
   dirt: v.dirt !== false,
 })
 
-type Loaded = { analysis: SoundAnalysis; levels: (number[] | null)[]; peaks: (number | null)[] } | { error: string } | null
+type Loaded = { audio: Audio; analysis: SoundAnalysis; levels: (number[] | null)[]; peaks: (number | null)[] } | { error: string } | null
 
 /**
  * Asks before the whole patch is replaced by one that plays the note recorded in `file`
@@ -30,6 +30,31 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
   const loadPatch = useEditor((s) => s.loadPatch)
   const [choices, choose] = useSessionChoices('hydrasynth-editor.wav', readChoices)
   const [loaded, setLoaded] = useState<Loaded>(null)
+  // The recording, as the analysis heard it (mono), so any WAV it reads also plays
+  const player = useRef<{ context: AudioContext; source: AudioBufferSourceNode } | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const stop = () => {
+    const p = player.current
+    player.current = null
+    if (p) void p.context.close()
+    setPlaying(false)
+  }
+  useEffect(() => stop, [])
+  const togglePlay = () => {
+    if (player.current) return stop()
+    if (!loaded || !('audio' in loaded)) return
+    const { samples, sampleRate } = loaded.audio
+    const context = new AudioContext()
+    const buffer = context.createBuffer(1, samples.length, sampleRate)
+    buffer.getChannelData(0).set(samples)
+    const source = context.createBufferSource()
+    source.buffer = buffer
+    source.connect(context.destination)
+    source.onended = () => player.current?.source === source && stop()
+    source.start()
+    player.current = { context, source }
+    setPlaying(true)
+  }
   useEffect(() => {
     ref.current?.showModal()
     let live = true
@@ -37,8 +62,9 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
       try {
         const [bytes, levels, peaks] = await Promise.all([file.arrayBuffer(), waveLevels(), wavePeaks()])
         if (levels.filter(Boolean).length < WAVE_FEATURES.length) throw new Error('The wave data didn’t load')
-        const analysis = analyse(parseWav(bytes))
-        if (live) setLoaded({ analysis, levels, peaks })
+        const audio = parseWav(bytes)
+        const analysis = analyse(audio)
+        if (live) setLoaded({ audio, analysis, levels, peaks })
       } catch (e) {
         if (live) setLoaded({ error: e instanceof Error ? e.message : String(e) })
       }
@@ -68,13 +94,14 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
   const status = result ? wavStatus(result) : loaded && 'error' in loaded ? loaded.error : 'Listening…'
 
   const replace = () => {
+    stop()
     ref.current?.close()
     if (result) void loadPatch(result.patch, `Patch from “${file.name}”`)
     onDone()
   }
 
   return (
-    <dialog ref={ref} className="write-dialog speech-dialog wav-dialog" onCancel={onDone}>
+    <dialog ref={ref} className="write-dialog speech-dialog wav-dialog" onCancel={() => (stop(), onDone())}>
       <h2>Patch from “{title}”</h2>
       <p className="wav-dialog__intro">
         Replaces “{name}” with a starting point made from the recorded note.
@@ -148,7 +175,17 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
         <p>Best with one dry note of a quarter second or more, 20 Hz to 2 kHz.</p>
       </details>
       <div className="write-dialog__actions">
-        <button type="button" className="function-button" onClick={() => (ref.current?.close(), onDone())}>
+        <button
+          type="button"
+          className="function-button wav-dialog__play"
+          onClick={togglePlay}
+          disabled={!loaded || !('audio' in loaded)}
+          aria-pressed={playing}
+          title="Listen to the original recording"
+        >
+          {playing ? '■ Stop' : '▶ Play Original'}
+        </button>
+        <button type="button" className="function-button" onClick={() => (stop(), ref.current?.close(), onDone())}>
           Cancel
         </button>
         <button type="button" className="function-button function-button--primary" onClick={replace} disabled={!result}>

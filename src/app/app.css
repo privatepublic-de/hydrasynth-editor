@@ -1158,6 +1158,10 @@ select {
   color: var(--print);
 }
 
+.wav-dialog__play {
+  margin-right: auto;
+}
+
 .wav-dialog__what {
   margin: 0;
 }
