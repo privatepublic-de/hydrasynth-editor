@@ -74,83 +74,79 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
   }
 
   return (
-    <dialog ref={ref} className="write-dialog speech-dialog" onCancel={onDone}>
-      <h2>Generate patch from “{title}”</h2>
-      <p>
-        Replaces all of “{name}” with a patch to start from, made from the note recorded in the file.
-        {demo ? '' : ' Can’t be undone.'}
-        {dirty && ' Your unwritten changes are lost.'}
+    <dialog ref={ref} className="write-dialog speech-dialog wav-dialog" onCancel={onDone}>
+      <h2>Patch from “{title}”</h2>
+      <p className="wav-dialog__intro">
+        Replaces “{name}” with a starting point made from the recorded note.
+        {demo ? '' : ' No undo.'}
+        {dirty && ' Unwritten changes are lost.'}
       </p>
+      <div className="wav-dialog__selects">
+        <label
+          className="speech-dialog__field"
+          title="The synth’s own waves matched to the recording’s harmonics, a Sine through Mutant 1’s FM at the ratio and depth that match them, or whichever of the two comes closer."
+        >
+          Sound
+          <select value={choices.source} onChange={(e) => choose({ source: Number(e.target.value) })}>
+            {SOURCES.map((s, i) => (
+              <option key={s.value} value={i}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="speech-dialog__field" title="The Amp envelope: as the recording rises and fades, or a typical shape.">
+          Envelope
+          <select value={choices.envelope} onChange={(e) => choose({ envelope: Number(e.target.value) })}>
+            {ENVELOPES.map((env, i) => (
+              <option key={env.value} value={i}>
+                {env.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       <label
         className="speech-dialog__field"
-        title="What makes the sound: the synth’s own waves matched to the recording’s harmonics, a Sine through Mutant 1’s FM at the ratio and depth that match them, or whichever of the two comes closer."
-      >
-        Sound from
-        <select value={choices.source} onChange={(e) => choose({ source: Number(e.target.value) })}>
-          {SOURCES.map((s, i) => (
-            <option key={s.value} value={i}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="speech-dialog__field" title="The Amp envelope: as the recording rises and fades, or a typical shape.">
-        Envelope
-        <select value={choices.envelope} onChange={(e) => choose({ envelope: Number(e.target.value) })}>
-          {ENVELOPES.map((env, i) => (
-            <option key={env.value} value={i}>
-              {env.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label
-        className="speech-dialog__field"
-        title="Waves picked along the note, swept by WaveScan (ENV 3), and the filter following its brightness (ENV 1); with FM, ENV 3 moves its depth instead, and the filter stays put. A pad's slow swings on LFO 4 and 5 (pitch, the cutoff or WaveScan), and Amp LFO 2 (level)."
+        title="Waves picked along the note, swept by WaveScan (ENV 3), and the filter following its brightness (ENV 1); with FM, ENV 3 moves its depth instead. A pad’s slow swings on LFO 4 and 5 (pitch, the cutoff, WaveScan or the pulse width), and Amp LFO 2 (level)."
       >
         <input type="checkbox" checked={choices.overTime} onChange={(e) => choose({ overTime: e.target.checked })} />
-        Follow how the sound changes
+        Changes over time and slow swings
       </label>
       <label className="speech-dialog__field" title="Vibrato (LFO 1) and tremolo (LFO 2) as in the recording; without vibrato in it, the Mod Wheel adds some.">
         <input type="checkbox" checked={choices.wobble} onChange={(e) => choose({ wobble: e.target.checked })} />
-        Vibrato and tremolo as recorded
+        Vibrato and tremolo
       </label>
       <label
         className="speech-dialog__field"
-        title="Noise between the harmonics (the noise source), a second voice some cents off (OSC 3), a string machine's ensemble (two Choruses on the FX) and a pitch that wanders (a Random LFO 3), where the recording has more of them than a clean synth. Distortion is on the Dirt macro."
+        title="Noise between the harmonics (the noise source), a second voice some cents off (OSC 3), a string machine’s ensemble (two Choruses on the FX) and a pitch that wanders (a Random LFO 3), where the recording has more of them than a clean synth. Distortion is on the Dirt macro."
       >
         <input type="checkbox" checked={choices.dirt} onChange={(e) => choose({ dirt: e.target.checked })} />
-        Drift, detune, ensemble and noise as recorded
+        Drift, detune, ensemble and noise
       </label>
+      <div className="wav-dialog__result" aria-live="polite">
+        <p className="speech-dialog__said wav-dialog__said">{status}</p>
+        {result && <p className="wav-dialog__next">Macros: {result.macros.join(', ')}. Velocity and aftertouch open the filter.</p>}
+      </div>
       <details className="wav-dialog__what">
         <summary>What it can make</summary>
-        <p>A starting point to shape further, not a copy of the recording.</p>
         <ul>
           <li>
-            <strong>Good starting points:</strong> one note of a synth, keys, bass, lead, pad, organ, flute or string machine;
-            sung vowels; tonal drums (kicks with their pitch drop, toms, snare bodies).
+            <strong>Good:</strong> one note of a synth, keys, bass, lead, organ, flute or string machine; sung vowels; tonal drums.
           </li>
           <li>
-            <strong>Pads that move:</strong> a held note's slow swings (pitch, filter, pulse width, level) on LFOs at their rate; a
-            second oscillator at its own interval, a sub or an octave; voices beating a few cents apart. Hold it two seconds or
-            more.
+            <strong>Pads that move</strong> (held 2 s or more): slow swings on LFOs; a second oscillator, sub or octave; voices a few
+            cents apart.
           </li>
           <li>
-            <strong>Rough, but usable:</strong> hi-hats, claps, crashes and other noise: the noise source through the filter, any
-            key plays it.
+            <strong>Rough:</strong> hi-hats, claps, crashes and other noise, as filtered noise.
           </li>
           <li>
-            <strong>A single-note stand-in:</strong> chords, bells, drum loops, long slides.
+            <strong>A stand-in:</strong> chords, bells, drum loops, long slides.
           </li>
         </ul>
-        <p>Best with one note, dry, at least a quarter second long, from about 20 Hz to 2 kHz.</p>
+        <p>Best with one dry note of a quarter second or more, 20 Hz to 2 kHz.</p>
       </details>
-      <p className="speech-dialog__said wav-dialog__said">{status}</p>
-      {result && (
-        <p className="wav-dialog__next">
-          Shape it from there with the macros ({result.macros.join(', ')}); velocity and aftertouch open the filter.
-        </p>
-      )}
       <div className="write-dialog__actions">
         <button type="button" className="function-button" onClick={() => (ref.current?.close(), onDone())}>
           Cancel

@@ -1108,17 +1108,58 @@ select {
   text-overflow: ellipsis;
 }
 
+/*
+ * A patch from a WAV: pinned to a top edge rather than centred, so it doesn't jump as its result
+ * and "What it can make" change its height; the result in a box of fixed height.
+ */
+.wav-dialog[open] {
+  margin: 8vh auto auto;
+  max-height: 84vh;
+  overflow-y: auto;
+}
+
+.wav-dialog h2 {
+  font-size: 18px;
+}
+
+.wav-dialog__intro {
+  margin: 0 0 12px;
+  color: var(--print);
+}
+
+.wav-dialog__selects {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 16px;
+}
+
+.wav-dialog .speech-dialog__field {
+  margin-bottom: 8px;
+}
+
+.wav-dialog__result {
+  height: 7.4em;
+  overflow-y: auto;
+  margin: 12px 0;
+  padding: 8px 10px;
+  background: var(--recess);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+}
+
 /* A patch from a WAV says more than a spelling: it wraps. */
 .wav-dialog__said {
   white-space: normal;
+  margin: 0 0 6px;
 }
 
 .wav-dialog__next {
-  margin: 0 0 12px;
+  margin: 0;
+  color: var(--print);
 }
 
 .wav-dialog__what {
-  margin: 0 0 12px;
+  margin: 0;
 }
 
 .wav-dialog__what summary {

@@ -49,8 +49,9 @@ The patch bar's menu (☰) → Generate patch from WAV… makes a patch from the
 file: a starting point to shape further, not a copy of the recording. It reads the note's
 pitch, its harmonics and how they change, its envelope, vibrato and tremolo, and its noise,
 drift, detune and chorus, and builds the patch from the synth's own waves or Mutant FM (or
-whichever comes closer). Macros (Bright, Timbre, Attack, Release, Dirt, Movement) start where
-the patch is, velocity and aftertouch open the filter.
+whichever comes closer). Macros (Bright, Timbre or Resonance, Attack, Release, Dirt, and
+Movement and Noise where the patch has them) start where the patch is, velocity and aftertouch
+open the filter.
 
 A held note of two seconds or more is also read as a pad: its slow swings (under 3 Hz) of
 pitch, timbre and level play on LFO 4 and 5 at their rate, the timbre's as the cutoff, as
@@ -68,9 +69,9 @@ swings, or sits a few cents off. Movement then scales the LFOs.
 - **A single-note stand-in:** chords, bells and other inharmonic sounds, drum loops, and slides
   over more than an octave or so.
 
-Best with one note, dry, at least a quarter second long, from about 20 Hz to 2 kHz. The status
-line under the choices says what the patch is made of and the note to play, and when the
-recording isn't one clear note (a rough start).
+Best with one note, dry, at least a quarter second long, from about 20 Hz to 2 kHz. The box
+under the choices says what the patch is made of, the note to play and its macros, and when the
+recording isn't one clear note (a rough start); it follows the choices as they change.
 
 ## A patch that speaks
 
