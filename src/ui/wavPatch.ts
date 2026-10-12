@@ -37,6 +37,7 @@
 // Measured on a Hydrasynth Desktop (fw 2.x) with tools/calibrateWavPatch.ts; see CALIBRATION.
 import type { Adsr, SoundAnalysis, Wobble } from '../audio/analyse'
 import { detuneLevel } from '../audio/dirt'
+import type { Movement } from '../audio/movement'
 import { BAND_HZ } from '../audio/bands'
 import { noteName } from '../audio/pitch'
 import { formatValue } from '../params/display'
@@ -118,6 +119,19 @@ export const CALIBRATION = {
   driftCentsPerDepth: 1.15,
   /** The Voice's own vibrato only plays with the Mod Wheel up: cents to either side per Amount raw (vibrato: 0.5 47, 2.0 186). */
   voiceVibratoCentsPerRaw: 9.3,
+  /**
+   * Slow LFOs as src/audio/movement.ts reads them (slowlfo, a Saw at C3, LFO 4 Sine at full level):
+   * on All Osc Pitch, cents to either side per route depth (39 at depth 4, 0.4-3 Hz, rates as shown);
+   * on Filt 1 Cutoff, octaves between the swing's two ends per route depth (1.44 at 8, 2.86 at 16);
+   * LFO 4 Unipolar on Osc 1 WaveScan from 0 at this depth swings from wave 1 to wave 2 (Square to
+   * Pulse 3: each end within 0.6-7.6 dB of its wave); Amp LFO 2 Amount +32 at 0.5 Hz, dB to either side.
+   */
+  slow: { pitchCentsPerDepth: 9.8, cutoffOctavesPerDepth: 0.18, scanDepth: 18.25, tremoloDbAt32: 2.6 },
+  /**
+   * Mutant PhazDiff on a Saw: a pulse (the Saw less itself delayed) of width Depth / 1024, to 50 % at
+   * 512 (pw: 256 read 25.5 %, 512 49.5 %, as |sin(pi k w)| / k fitted to the harmonics, within 1-2 dB).
+   */
+  phazDiffWidthPerRaw: 1 / 1024,
 }
 
 export type Envelope = 'detect' | 'pluck' | 'keys' | 'pad'
@@ -163,6 +177,12 @@ export interface WavPatch {
   dirt: { noise: string | null; drift: number | null; detune: number | null; ensemble: boolean }
   /** OSC 2 plays a Sine under the wave. */
   sub: boolean
+  /** OSC 2's wave and its interval (semitones) when the recording has a second oscillator; `swing`: the wave its WaveScan swings to. */
+  second: { wave: number; semitones: number; swing?: number } | null
+  /** The slow swings LFO 4 and 5 (and Amp LFO 2) play, as the status says them. */
+  swings: string[]
+  /** Voices a few cents apart (cents off the note) on OSC 1, 3 and 2, or null. */
+  voices: number[] | null
   /** Noise instead of a note: the noise source's colour through a low-pass at `cutoffHz` (as at middle C). */
   noise: { colour: string; cutoffHz: number } | null
   /** Filter 1's Resonance (raw), for a resonant peak the recording has. */
@@ -214,7 +234,7 @@ export function lpDb(ratio: number, q = 0.54): number {
 /**
  * How far `levels` (dB per harmonic, from 0) are from `target`, through LP Ladder 12 at `cutoff`
  * times the pitch and `resonance` (raw): RMS of the dB difference, both floored at -60 dB, low harmonics weighted more,
- * any overall level difference taken out.
+ * any overall level difference taken out; harmonics `target` has as NaN left out.
  */
 export function distance(target: number[], levels: number[], cutoff = Infinity, resonance = 0): number {
   const n = Math.min(target.length, levels.length)
@@ -225,6 +245,8 @@ export function distance(target: number[], levels: number[], cutoff = Infinity, 
   let sd = 0
   let sdd = 0
   for (let k = 0; k < n; k++) {
+    // NaN: not known (a second oscillator's harmonic on one of the note's).
+    if (target[k] !== target[k]) continue
     const d = Math.max(target[k], FLOOR) - Math.max(levels[k] + filter[k] - top, FLOOR)
     const w = WEIGHTS[k]
     sw += w
@@ -479,9 +501,10 @@ function scanWaves(a: SoundAnalysis, levels: (number[] | null)[], cutoffs: numbe
 
 /**
  * How much dirt a recording needs before the patch plays it: more than a clean synth recording
- * reads (noise -55..-70 dB, drift under 1 cent, 2-3 where a filter or WaveScan moves the phase).
+ * reads (noise -55..-70 dB, drift under 1 cent, 2-3 where a filter or WaveScan moves the phase); no
+ * drift where the pitch or timbre swings slowly, nor noise under a pitch swinging `swingCents`.
  */
-const DIRT = { noiseDb: -50, noiseUnderDb: 3, driftCents: 2.5, driftMaxCents: 8, detuneCents: 2 }
+const DIRT = { noiseDb: -50, noiseUnderDb: 3, driftCents: 2.5, driftMaxCents: 8, detuneCents: 2, swingCents: 10 }
 
 /**
  * How much (dB, 0 or less) LP Ladder 12 at `cutoffHz` takes off a noise of `slope` dB an octave,
@@ -495,6 +518,7 @@ function noiseFilterLoss(slope: number, cutoffHz: number): number {
 
 /** The Sine (wave 0), and how far (dB) a wave's fundamental may fall short before OSC 2 plays one under it. */
 const SINE = 0
+const SAW = 3
 const SUB_GAP = 6
 
 /** How much closer (dB, on average over the frames) WaveScan has to play the note than one wave. */
@@ -513,6 +537,82 @@ function setEnvelope(p: Patch, n: number, adsr: Adsr, amp: boolean) {
   p.set(`${env}releasesyncoff`, rawFor(`${env}releasesyncoff`, (adsr.releaseS * 1000) / release))
 }
 
+/**
+ * How a slow timbre swing plays (src/audio/movement.ts's two ends, `low` and `high`) on a wave
+ * through the filter: the cutoff swinging (the wave as it is, a cutoff fitted to each end), or
+ * WaveScan between the waves that fit each end, or a Saw's pulse width (Mutant PhazDiff) swinging
+ * between the widths that fit each end; whichever is closest, if that's SWING.better dB closer (both
+ * ends together) than the wave played still. Null for none. `least`: the lowest
+ * cutoff (x pitch) WaveScan may play through (a second oscillator's, through the same filter).
+ */
+function timbreSwing(t: NonNullable<Movement['timbre']>, levels: (number[] | null)[], wave: number, cutoff: number, resonance: number, least = 0) {
+  // Still, through no lower a cutoff than WaveScan may have: the filter is one for both oscillators.
+  const open = Math.max(cutoff, least)
+  const stillOn = (ends: { low: number[]; high: number[] }) => distance(ends.low, levels[wave]!, open, resonance) + distance(ends.high, levels[wave]!, open, resonance)
+  const still = stillOn(t)
+  const [lowCut, highCut] = [bestCutoff(t.low, levels[wave]!, RATIOS, resonance), bestCutoff(t.high, levels[wave]!, RATIOS, resonance)]
+  const span = Math.abs(octaves(highCut.cutoff) - octaves(lowCut.cutoff))
+  const byFilter = span >= SWING.octaves ? lowCut.fit + highCut.fit : Infinity
+  // WaveScan: the two waves and the one cutoff they both play through closest (the cutoff the note's
+  // peak fits may suit neither end).
+  let scan: { waves: readonly [number, number]; cutoff: number; fit: number } = { waves: [0, 0], cutoff, fit: Infinity }
+  for (const c of RATIOS.filter((r) => r >= least)) {
+    const [lowWave, highWave] = [fitWave(t.low, levels, c, resonance), fitWave(t.high, levels, c, resonance)]
+    if (lowWave.wave !== highWave.wave && lowWave.fit + highWave.fit < scan.fit - CLOSER) scan = { waves: [lowWave.wave, highWave.wave], cutoff: c, fit: lowWave.fit + highWave.fit }
+  }
+  // A pulse width swinging (Mutant PhazDiff on a Saw): the widths that fit each end, through a cutoff
+  // no lower than still's. Judged on the first harmonics only: each end averages frames near it, and
+  // higher up, where the width's nulls fall at a different harmonic in each, they blur.
+  const first = { low: t.low.slice(0, SWING.harmonics), high: t.high.slice(0, SWING.harmonics) }
+  let pulse: { widths: readonly [number, number]; cutoff: number; fit: number } = { widths: [0, 0], cutoff, fit: Infinity }
+  for (const c of RATIOS.filter((r) => r >= open)) {
+    const [lowWidth, highWidth] = [first.low, first.high].map((end) =>
+      PULSES.reduce((best, { width, levels: l }) => {
+        const fit = distance(end, l, c, resonance)
+        return fit < best.fit ? { width, fit } : best
+      }, { width: 0, fit: Infinity }),
+    )
+    if (Math.abs(lowWidth.width - highWidth.width) >= SWING.widths && lowWidth.fit + highWidth.fit < pulse.fit - CLOSER) pulse = { widths: [lowWidth.width, highWidth.width], cutoff: c, fit: lowWidth.fit + highWidth.fit }
+  }
+  // Whichever gains most on still, as each is judged, if by SWING.better.
+  const [byPulse, byOther] = [stillOn(first) - pulse.fit, still - Math.min(byFilter, scan.fit)]
+  if (Math.max(byPulse, byOther) < SWING.better) return null
+  if (byPulse >= byOther) return { widths: pulse.widths, cutoff: pulse.cutoff }
+  return scan.fit < byFilter ? { scan: scan.waves, cutoff: scan.cutoff } : { cutoffs: [lowCut.cutoff, highCut.cutoff] as const }
+}
+
+/** Pulses of width 2 % to 50 % (Mutant PhazDiff on a Saw), their harmonics as harmonicLevels gives a wave's. */
+const PULSES = Array.from({ length: 49 }, (_, i) => {
+  const width = (i + 2) / 100
+  const amps = Array.from({ length: 128 }, (_, k) => Math.abs(Math.sin(Math.PI * (k + 1) * width)) / (k + 1))
+  const top = Math.max(...amps)
+  return { width, levels: amps.map((a) => 20 * Math.log10(a / top + 1e-5)) }
+})
+
+
+/**
+ * Slow swings played: closer by this much (dB, both ends; a pulse width's over the first `harmonics`,
+ * swinging at least `widths`) than still; a cutoff swinging at least this
+ * many octaves; LFOs this near in rate (share) are one; a detune's beat this near a swing's rate is the swing.
+ */
+const SWING = { better: 0.5, harmonics: 24, widths: 0.05, octaves: 0.3, sameRate: 0.1, beatNear: 0.25 }
+
+/** Osc `n` WaveScan from `from` (Wave 1) to `to` (Wave 2 and on: a deeper swing stays on it). */
+function scanPair(p: Patch, n: 1 | 2, from: number, to: number) {
+  p.set(`osc${n}mode`, 1)
+  p.set(`osc${n}wavscan`, 0)
+  p.set(`osc${n}wavscanwave1`, from)
+  for (let slot = 2; slot <= 8; slot++) p.set(`osc${n}wavscanwave${slot}`, to + 2)
+}
+
+/** The frames' harmonics on average (their power), dB from the loudest. */
+function meanLevels(frames: SoundAnalysis['frames']): number[] {
+  const n = Math.min(...frames.map((f) => f.harmonics.levels.length))
+  const power = Array.from({ length: n }, (_, k) => frames.reduce((sum, f) => sum + 10 ** ((f.harmonics.levels[k] + f.db) / 10), 0))
+  const top = Math.max(...power)
+  return power.map((p) => 10 * Math.log10(p / top + 1e-10))
+}
+
 /** The Init patch turned into one that plays the note in `a`. */
 export function buildWavPatch(
   a: SoundAnalysis,
@@ -524,7 +624,12 @@ export function buildWavPatch(
   // A resonant filter where the recording shows one; the wave then chosen at that resonance, so
   // a wave's own bump doesn't stand in for the peak.
   const found = source === 'fm' ? 0 : resonanceOf(a, levels)
-  const byWave = source === 'fm' ? null : { ...fitWave(a.spectrum.levels, levels, undefined, found), resonance: found }
+  // A pad that swings plays one timbre all along (no envelopes over time): the one it has on average
+  // over its sounding frames, not its first moment's. Beside a second oscillator, the note's
+  // harmonics on its are both's: left out of the fit.
+  const heard = a.movement && sounding(a).length ? meanLevels(sounding(a)) : a.spectrum.levels
+  const own = a.second ? heard.map((l, k) => (a.second!.shared[k] ? NaN : l)) : heard
+  const byWave = source === 'fm' ? null : { ...fitWave(own, levels, undefined, found), resonance: found }
   // FM through an open filter: its Depth carries the brightness, as on a DX; a cutoff fitted at the
   // peak trimmed the bright start of a falling Depth, and the level then swelled in as it fell.
   const byFm = source === 'waves' ? null : fitFm(a.spectrum.levels, undefined, Infinity)
@@ -570,7 +675,33 @@ export function buildWavPatch(
   // makes up the difference (the levels set the wave's loudest harmonic against the note's).
   let sub = false
   const wave = waves[0]
-  if (!useFm && peaks?.[wave] && peaks[SINE]) {
+  // A slow timbre swing (a pad's LFO on its filter or pulse width): LFO 4 plays it, not the
+  // envelopes over time, which would take its first swing for a sweep. The cutoff it plays through
+  // (the middle of a swinging one) is the one OSC 2 is fitted at.
+  const least = a.second ? fitWave(a.second.levels, levels, undefined, resonance).cutoff * 2 ** (a.second.semitones / 12) : 0
+  const swingTimbre = overTime && !useFm && a.movement?.timbre ? timbreSwing(a.movement.timbre, levels, wave, cutoff, resonance, least) : null
+  const played = swingTimbre?.cutoff ?? (swingTimbre?.cutoffs ? 2 ** ((octaves(swingTimbre.cutoffs[0]) + octaves(swingTimbre.cutoffs[1])) / 2) : cutoff)
+
+  // OSC 2: a second oscillator at its own pitch, its wave fitted through the same filter.
+  let second: WavPatch['second'] = null
+  if (a.second) {
+    const { semitones, levels: target, db } = a.second
+    const ratio = 2 ** (semitones / 12)
+    const fitted = fitWave(target, levels, played / ratio, resonance)
+    let semi = Math.round(semitones)
+    let cents = Math.round((semitones - semi) * 100)
+    if (Math.abs(cents) > 50) [semi, cents] = [semi + Math.sign(cents), cents - 100 * Math.sign(cents)]
+    p.set('osc2type', fitted.wave)
+    p.set('osc2semi', semi)
+    p.set('osc2cent', cents)
+    // Its loudest harmonic `db` against the note's; the waves' own peaks (the levels are each wave's
+    // from its loudest) and the mixer's square law make that the volumes.
+    const want = 10 ** (db / 20) * (peaks?.[wave] && peaks[fitted.wave] ? peaks[wave]! / peaks[fitted.wave]! : 1)
+    p.set('mixerosc2vol', clamp(Math.round(1024 * Math.sqrt(Math.min(1, want)))))
+    if (want > 1) p.set('mixerosc1vol', clamp(Math.round(1024 * Math.sqrt(1 / want))))
+    second = { wave: fitted.wave, semitones: semi + cents / 100 }
+  }
+  if (!second && !useFm && peaks?.[wave] && peaks[SINE]) {
     const want = 10 ** (a.spectrum.levels[0] / 20)
     const has = 10 ** ((levels[wave]![0] + lpDb(1 / cutoff)) / 20)
     if (20 * Math.log10(want / has) > SUB_GAP) {
@@ -584,7 +715,9 @@ export function buildWavPatch(
     }
   }
 
-  if (overTime && !useFm) {
+  // Nor where the timbre swings in a way neither plays, or the pitch swings (the frames are read at
+  // the note: off it, the harmonics darken): the envelopes would follow a swing as a sweep.
+  if (overTime && !useFm && !a.movement?.timbre && !a.movement?.pitch) {
     const bright = brightness(a, levels[wave]!, resonance)
     if (bright) {
       // ENV 1 from the lower end's cutoff up by the span; Env 1 Amount scales a full envelope.
@@ -612,6 +745,72 @@ export function buildWavPatch(
     }
   }
 
+  // Slow movement: LFO 4 (Sine, at half level so the Movement macro can double it, the routes
+  // twice as deep) at the timbre's swing, or the pitch's; LFO 5 for a pitch swing at a rate of its own.
+  const swings: string[] = []
+  const m = overTime ? a.movement : null
+  const near = (x: number, y: number) => Math.abs(x / y - 1) < SWING.sameRate
+  const lfo = (n: 4 | 5, rateHz: number) => {
+    p.set(`lfo${n}wave`, 0) // Sine
+    p.set(`lfo${n}bpmsync`, 0)
+    p.set(`lfo${n}ratesyncoff`, rawFor(`lfo${n}ratesyncoff`, rateHz))
+    p.set(`lfo${n}level`, 512)
+  }
+  let lfo4: number | null = null
+  let pulse: readonly [number, number] | null = null
+  const otherTimbre = overTime && second && a.second?.movement?.timbre
+  if (swingTimbre && m?.timbre) {
+    lfo4 = m.timbre.rateHz
+    lfo(4, lfo4)
+    if (swingTimbre.widths) {
+      // A Saw through Mutant 1 in PhazDiff: a pulse, its width the Depth (in the middle of the two
+      // ends), LFO 4 swinging it to either.
+      const [from, to] = swingTimbre.widths
+      p.set('filter1cutoff', cutoffRaw(swingTimbre.cutoff!, a.f0, a.midi))
+      p.set('osc1type', SAW)
+      waves = [SAW]
+      p.set('mutant1mode', 7) // PhazDiff
+      p.set('mutant1wet', 1024)
+      p.set('mutant1depth', Math.round((from + to) / 2 / CALIBRATION.phazDiffWidthPerRaw))
+      route(p, 8, 9 /* LFO 4 */, 'mutant1depth', (2 * Math.abs(to - from)) / 2 / CALIBRATION.phazDiffWidthPerRaw / CALIBRATION.routeRawPerDepth)
+      pulse = [from, to]
+      swings.push(`pulse width swinging ${Math.round(100 * Math.max(from, to))}–${Math.round(100 * Math.min(from, to))} % ${m.timbre.rateHz.toFixed(1)} Hz`)
+    } else if (swingTimbre.scan) {
+      const [from, to] = swingTimbre.scan
+      p.set('filter1cutoff', cutoffRaw(swingTimbre.cutoff!, a.f0, a.midi))
+      scanPair(p, 1, from, to)
+      waves = [from, to]
+      route(p, 8, 14 /* LFO 4 Unipolar */, 'osc1wavscan', 2 * CALIBRATION.slow.scanDepth)
+      swings.push(`WaveScan swinging ${m.timbre.rateHz.toFixed(1)} Hz`)
+    } else {
+      const [lo, hi] = swingTimbre.cutoffs!.map(octaves)
+      p.set('filter1cutoff', cutoffRaw(2 ** ((lo + hi) / 2), a.f0, a.midi))
+      route(p, 8, 9 /* LFO 4 */, 'filter1cutoff', (2 * Math.abs(hi - lo)) / CALIBRATION.slow.cutoffOctavesPerDepth)
+      swings.push(`filter swinging ${m.timbre.rateHz.toFixed(1)} Hz`)
+    }
+  }
+  // OSC 2's own timbre swing: WaveScan between the waves fitting its ends, on LFO 4 if it's free or near.
+  if (otherTimbre && second && (lfo4 === null || near(otherTimbre.rateHz, lfo4))) {
+    const ratio = 2 ** (second.semitones / 12)
+    const [from, to] = [fitWave(otherTimbre.low, levels, played / ratio, resonance).wave, fitWave(otherTimbre.high, levels, played / ratio, resonance).wave]
+    if (from !== to) {
+      if (lfo4 === null) lfo(4, (lfo4 = otherTimbre.rateHz))
+      scanPair(p, 2, from, to)
+      second = { ...second, wave: from, swing: to }
+      route(p, 10, 14 /* LFO 4 Unipolar */, 'osc2wavscan', 2 * CALIBRATION.slow.scanDepth)
+      swings.push(`OSC 2 WaveScan swinging ${otherTimbre.rateHz.toFixed(1)} Hz`)
+    }
+  }
+  if (m?.pitch) {
+    const n = lfo4 === null || near(m.pitch.rateHz, lfo4) ? 4 : 5
+    if (n === 4 && lfo4 === null) lfo(4, (lfo4 = m.pitch.rateHz))
+    if (n === 5) lfo(5, m.pitch.rateHz)
+    // On OSC 1 alone where an octave oscillator holds still beside it (Osc 2 Pitch measured the same as All Osc).
+    const target = a.second?.kind === 'octave' && a.second.semitones === 12 ? 'osc1semi' : 'allosc'
+    route(p, 9, n === 4 ? 9 : 10 /* LFO 4, LFO 5 */, target, (2 * m.pitch.depth) / CALIBRATION.slow.pitchCentsPerDepth)
+    swings.push(`pitch swinging ${Math.round(m.pitch.depth)} cents ${m.pitch.rateHz.toFixed(1)} Hz`)
+  }
+
   // ENV 4 on All Osc Pitch: the drop (or rise) into the note, its curve as the recording's shape.
   let glide: number | null = null
   if (a.glide) {
@@ -629,9 +828,16 @@ export function buildWavPatch(
   setEnvelope(p, 2, adsr, true)
 
   // An ensemble's fast sweep reads as vibrato and its beating as tremolo: its choruses play both.
-  const ensemble = dirt && !!a.dirt.chorus && !a.warnings.includes('inharmonic or noisy')
+  // A second oscillator's harmonics between and beside the note's read as noise, beats and wobble:
+  // the dirt meters can't tell, so two oscillators play clean. A sub's lie midway between the
+  // note's, where the noise is read, and nowhere else: only the noise is left out.
+  const dirty = dirt && (!a.second || a.second.kind === 'sub')
+  // Voices a few cents apart beat like a chorus: they play as voices, not as an ensemble.
+  const ensemble = dirty && !a.voices && !!a.dirt.chorus && !a.warnings.includes('inharmonic or noisy')
   const vibrato = wobble && !ensemble ? a.vibrato : null
-  const tremolo = wobble && !ensemble ? a.tremolo : null
+  // Nor is the beat of voices, or of an octave a few cents off, a tremolo: they play it.
+  const beating = !!a.voices || (a.second?.kind === 'octave' && a.second.semitones !== 12)
+  const tremolo = wobble && !ensemble && !beating ? a.tremolo : null
   p.set('voicevibratoamount', 0)
   if (vibrato) {
     p.set('lfo1wave', 0) // Sine
@@ -653,14 +859,42 @@ export function buildWavPatch(
     const ratio = 10 ** (tremolo.depth / 10)
     const swing = (ratio - 1) / (ratio + 1)
     p.set('amplfo2amount', clamp(Math.round(512 + (512 * swing) / CALIBRATION.tremoloSwing), 512))
+  } else if (m?.level && !(m.timbre && near(m.level.rateHz, m.timbre.rateHz))) {
+    // A slow level swing on its own (with the timbre's, it's the timbre's): Amp LFO 2, as measured slow.
+    p.set('lfo2wave', 0) // Sine
+    p.set('lfo2bpmsync', 0)
+    p.set('lfo2ratesyncoff', rawFor('lfo2ratesyncoff', m.level.rateHz))
+    p.set('lfo2level', 1024)
+    p.set('amplfo2amount', clamp(Math.round(512 + (256 * m.level.depth) / CALIBRATION.slow.tremoloDbAt32), 512))
+    swings.push(`level swinging ${m.level.rateHz.toFixed(1)} Hz`)
+  }
+
+  // Voices a few cents apart (a unison): OSC 1, 3 and (if no second oscillator has it) 2, the same
+  // wave, each its cents off the note (their mean, by level, on it) and at its level.
+  let voices: number[] | null = null
+  if (a.voices && !useFm) {
+    const heard = second ? [...a.voices].sort((x, y) => y.db - x.db).slice(0, 2) : a.voices
+    const weight = heard.map((v) => 10 ** (v.db / 20))
+    const centre = heard.reduce((s, v, i) => s + v.cents * weight[i], 0) / weight.reduce((s, w) => s + w, 0)
+    voices = heard.map((v) => Math.max(-50, Math.min(50, Math.round(v.cents - centre))))
+    heard.forEach((v, i) => {
+      const n = [1, 3, 2][i]
+      if (n !== 1) {
+        p.set(`osc${n}type`, waves[0])
+        p.set(`osc${n}semi`, 0) // Init has OSC 3 an octave down
+      }
+      p.set(`osc${n}cent`, voices![i])
+      p.set(`mixerosc${n}vol`, clamp(Math.round(1024 * Math.sqrt(10 ** (v.db / 20)))))
+    })
   }
 
   // Dirt, as recorded, where it's clearly more than a clean synth recording shows.
   const added: WavPatch['dirt'] = { noise: null, drift: null, detune: null, ensemble: false }
-  if (dirt) {
+  if (dirty) {
     const { noise, drift, detune, chorus } = a.dirt
     // Not on inharmonic sounds: what lies between their harmonics is partials, not noise.
-    if (noise && noise.db >= DIRT.noiseDb && !a.warnings.includes('inharmonic or noisy')) {
+    // Nor where the pitch swings far: the harmonics smear into the gaps the noise is read in.
+    if (noise && !a.second && noise.db >= DIRT.noiseDb && !a.warnings.includes('inharmonic or noisy') && (a.movement?.pitch?.depth ?? 0) < DIRT.swingCents) {
       // The colour nearest its slope, at the level that puts it as far under the harmonics.
       const colour = CALIBRATION.noise.reduce((x, c) => (Math.abs(c.slope - noise.slope) < Math.abs(x.slope - noise.slope) ? c : x))
       p.set('noisetype', colour.type)
@@ -671,14 +905,28 @@ export function buildWavPatch(
       p.set('mixernoisevol', clamp(Math.round(1024 * 10 ** ((noise.db - DIRT.noiseUnderDb - colour.db - loss) / 40))))
       added.noise = formatValue(param('noisetype'), colour.type)
     }
-    if (detune && detune.cents >= DIRT.detuneCents && !useFm) {
-      // OSC 3 the same wave, the two apart by the detune either side of the note.
-      const half = Math.min(25, detune.cents / 2)
+    // A detune whose beat is a slow swing's rate is that swing (a pulse width's, read as beats); a
+    // beat the movement found (harmonic k at k times its rate) and the detune meter didn't, a detune.
+    const beatHz = detune ? a.f0 * (2 ** (detune.cents / 1200) - 1) : 0
+    const swingHz = [a.movement?.level?.rateHz, a.movement?.timbre?.rateHz].filter((r): r is number => r !== undefined)
+    const beating = a.movement?.beat
+    const detuned =
+      detune && !swingHz.some((r) => Math.abs(r / beatHz - 1) < SWING.beatNear)
+        ? detune
+        : !detune && beating
+          ? { cents: 1200 * Math.log2(1 + beating.rateHz / a.f0), depth: beating.depth }
+          : null
+    if (detuned && !voices && detuned.cents >= DIRT.detuneCents && !useFm) {
+      const detune = detuned
+      // OSC 3 the same wave, the two apart by the detune either side of the note (in whole cents, the
+      // odd one up: 2.6 cents is 3, not 2, beating half as fast again).
+      const apart = Math.min(50, Math.round(detune.cents))
       p.set('osc3type', waves[0])
-      p.set('osc3cent', Math.round(half))
-      p.set('osc1cent', -Math.round(half))
+      p.set('osc3semi', 0) // Init has OSC 3 an octave down
+      p.set('osc3cent', apart - Math.floor(apart / 2))
+      p.set('osc1cent', -Math.floor(apart / 2))
       p.set('mixerosc3vol', clamp(Math.round(1024 * Math.sqrt(detuneLevel(detune.depth)))))
-      added.detune = 2 * Math.round(half)
+      added.detune = apart
     }
     // An ensemble: the FX's two choruses, as wet as reads nearest the recording's wobble.
     if (chorus && ensemble) {
@@ -694,7 +942,7 @@ export function buildWavPatch(
     }
     // A pitch that wanders: not where a second voice, a chorus or inharmonic partials make it look
     // so, nor past a few cents (a chorus's wobble, not an oscillator's drift).
-    if (drift >= DIRT.driftCents && drift <= DIRT.driftMaxCents && !added.detune && !chorus && !a.warnings.includes('inharmonic or noisy')) {
+    if (drift >= DIRT.driftCents && drift <= DIRT.driftMaxCents && !added.detune && !voices && !chorus && !a.movement?.pitch && !a.movement?.timbre && !a.warnings.includes('inharmonic or noisy')) {
       p.set('lfo3wave', 9) // Random
       p.set('lfo3bpmsync', 0)
       p.set('lfo3ratesyncoff', rawFor('lfo3ratesyncoff', 1.5))
@@ -705,14 +953,21 @@ export function buildWavPatch(
     }
   }
 
-  const timbre: Timbre = fm ? ['mutant1depth', 'Timbre', 384, 'middle'] : waves.length > 1 ? ['osc1wavscan', 'Timbre', 512, 'bottom'] : RESONANCE
-  const macros = finish(p, filterEnvelope, timbre, filterEnvelope ? 'filter1env1amount' : fm?.envelope || waves.length > 1 ? 'modmatrix1depth' : null, !!added.noise)
+  // Timbre moves WaveScan's start, unless LFO 4 swings it (its two waves would slide off), or the pulse width; Movement
+  // scales LFO 4 where it plays a swing.
+  const scanByEnvelope = waves.length > 1 && !swingTimbre
+  const timbre: Timbre = fm || pulse ? ['mutant1depth', 'Timbre', 384, 'middle'] : scanByEnvelope ? ['osc1wavscan', 'Timbre', 512, 'bottom'] : RESONANCE
+  const moving = lfo4 !== null ? 'lfo4level' : filterEnvelope ? 'filter1env1amount' : fm?.envelope || scanByEnvelope ? 'modmatrix1depth' : null
+  const macros = finish(p, filterEnvelope, timbre, moving, !!added.noise)
 
   return {
     patch: p,
     note: noteName(a.midi) + (Math.abs(a.cents) >= 5 ? ` ${a.cents > 0 ? '+' : '−'}${Math.abs(a.cents)} cents` : ''),
     waves,
     sub,
+    second,
+    swings,
+    voices,
     dirt: added,
     resonance,
     glide,
@@ -758,7 +1013,8 @@ function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: strin
   knob('env2releasesyncoff', 'Release', 384)
   knob('filter1drive', 'Dirt', 512, 'bottom')
   // Movement: none at the knob's bottom, as generated in its middle, twice as much at the top.
-  if (moving) knob(moving, 'Movement', 2 * Math.min(512, p.get(moving) - 512))
+  // (An LFO's Level runs from 0, the others from 512.)
+  if (moving) knob(moving, 'Movement', 2 * Math.min(512, p.get(moving) - (moving.startsWith('lfo') ? 0 : 512)))
   // Noise: none at the bottom, as generated in the middle (twice as loud at the top), so more or less is one knob.
   if (noise) {
     const v = p.get('mixernoisevol')
@@ -836,6 +1092,9 @@ function buildNoisePatch(a: SoundAnalysis, { envelope = 'detect', overTime = tru
     note: `any key (the filter as at ${noteName(NOISE_NOTE.midi)})`,
     waves: [],
     sub: false,
+    second: null,
+    swings: [],
+    voices: null,
     dirt: { noise: null, drift: null, detune: null, ensemble: false },
     resonance: 0,
     glide: null,
@@ -899,7 +1158,7 @@ function route(p: Patch, n: number, source: number, key: string, depth: number) 
  * filter envelope, vibrato on the Mod Wheel", or with FM "Play C4: Mutant FM 3:1, its depth
  * moving, ..."; a recording that isn't one clear note says so: "(noisy: a rough start)".
  */
-export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 'resonance' | 'glide' | 'noise' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
+export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'second' | 'swings' | 'voices' | 'dirt' | 'resonance' | 'glide' | 'noise' | 'fm' | 'filterEnvelope' | 'vibrato' | 'tremolo' | 'warnings'>): string {
   const name = (wave: number) => WAVE_FEATURES[wave]?.name ?? `Wave ${wave}`
   // The waves in the order they play, each once in a row; past three, the first and the last.
   const order = w.waves.filter((v, i) => v !== w.waves[i - 1]).map(name)
@@ -911,7 +1170,19 @@ export function wavStatus(w: Pick<WavPatch, 'note' | 'waves' | 'sub' | 'dirt' | 
   }
   const parts = w.fm
     ? [`Mutant FM ${w.fm.ratio}:1${w.fm.envelope ? ', its depth moving' : ''}`]
-    : [`${scan.join(' → ')}${w.waves.length > 1 ? ' by WaveScan' : ''}${w.sub ? ' over a Sine' : ''}`]
+    : w.swings.some((s) => s.startsWith('WaveScan'))
+      ? [`${scan.join(' ↔ ')}`]
+      : [`${scan.join(' → ')}${w.waves.length > 1 ? ' by WaveScan' : ''}${w.sub ? ' over a Sine' : ''}`]
+  if (w.second) {
+    // As OSC 2 shows it: Semitones, then Cents.
+    const semi = Math.round(w.second.semitones)
+    const cents = Math.round((w.second.semitones - semi) * 100)
+    const signed = (v: number) => `${v < 0 ? '−' : '+'}${Math.abs(v)}`
+    const wave = w.second.swing === undefined ? name(w.second.wave) : `${name(w.second.wave)} ↔ ${name(w.second.swing)}`
+    parts.push(`OSC 2 ${wave} at ${signed(semi)} semitones${cents ? ` ${signed(cents)} cents` : ''}`)
+  }
+  if (w.voices) parts.push(`${w.voices.length} voices ${w.voices.map((c) => `${c > 0 ? '+' : c < 0 ? '−' : ''}${Math.abs(c)}`).join(', ')} cents`)
+  parts.push(...w.swings)
   if (w.glide) parts.push(`pitch ${w.glide > 0 ? 'dropping' : 'rising'} ${Math.abs(w.glide)} semitones into it`)
   if (w.resonance) parts.push(w.filterEnvelope ? 'resonant filter envelope' : 'resonant filter')
   else if (w.filterEnvelope) parts.push('filter envelope')

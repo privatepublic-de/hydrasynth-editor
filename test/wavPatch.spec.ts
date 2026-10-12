@@ -233,7 +233,9 @@ describe('buildWavPatch', () => {
     const twin = buildWavPatch(analyse({ samples: mix(tone(130.81, sawAmps(130.81), 2.5), tone(130.81 * 2 ** (6 / 1200), sawAmps(130.81), 2.5)), sampleRate: RATE }), { levels })
     expect(twin.dirt.detune).toBeGreaterThanOrEqual(4)
     expect(show(twin.patch, 'osc3type')).toBe(show(twin.patch, 'osc1type'))
-    expect(twin.patch.get('osc3cent')).toBe(-twin.patch.get('osc1cent'))
+    // At the note's octave (Init has OSC 3 an octave down), the two the detune apart.
+    expect(twin.patch.get('osc3semi')).toBe(0)
+    expect(twin.patch.get('osc3cent') - twin.patch.get('osc1cent')).toBe(twin.dirt.detune)
     expect(twin.patch.get('mixerosc3vol')).toBeGreaterThan(512)
 
     const strings = buildWavPatch(analyse({ samples: ensemble(130.81, sawAmps(130.81), 3, 1), sampleRate: RATE }), { levels })
@@ -255,7 +257,7 @@ describe('buildWavPatch', () => {
     expect(show(drifting.patch, 'modmatrix6modsource')).toBe('LFO 3')
     expect(show(drifting.patch, 'modmatrix6modtarget')).toBe('All Osc Pitch')
     expect(show(drifting.patch, 'lfo3wave')).toBe('Random')
-  }, 30000) // several analyses of 2 s notes: ~2.5 s here, over 5 s on CI runners
+  }, 20000) // several analyses of 2 s notes: ~2.5 s here, over 5 s on CI runners
 
   it('plays noise as noise: its colour through the low-pass that shapes it, its filter moving', () => {
     /** `x` through a two-pole low-pass at `hz` (Q 0.54, LP Ladder 12's shape), the cutoff moving if a function. */
@@ -332,6 +334,101 @@ describe('buildWavPatch', () => {
     const w = buildWavPatch(saw, { levels })
     expect(wavStatus({ ...w, warnings: ['noisy', 'clipped'] })).toMatch(/\(noisy, clipped: a rough start\)$/)
   })
+
+  it('keeps a note with vibrato or a beat as bright as it is', () => {
+    // Read at their exact frequencies, the upper harmonics of a wobbling or detuned note read dark,
+    // and the fit closed the filter; read as band power, the saw plays through an open one.
+    const wobbly = analyse({ samples: tone(130.81, sawAmps(130.81), 2, { cents: (t) => 25 * Math.sin(2 * Math.PI * 5.5 * t) }), sampleRate: RATE })
+    const w = buildWavPatch(wobbly, { levels })
+    expect(show(w.patch, 'osc1type')).toBe('Saw')
+    // As open as a still saw's (velocity takes some off, to add at 100).
+    expect(played(w.patch, 'filter1cutoff')).toBe(played(buildWavPatch(analyse({ samples: tone(130.81, sawAmps(130.81), 2), sampleRate: RATE }), { levels }).patch, 'filter1cutoff'))
+  })
+
+  it('plays a second oscillator on OSC 2 at its interval, with its own wave', () => {
+    // A ninth up: none of their harmonics meet (a fifth up, the square's even ones lie on the saw's,
+    // and a saw's odd ones fit it as well).
+    const square = play(cycles[index('Square')]!, 293.66, 3)
+    const a = analyse({ samples: play(cycles[index('Saw')]!, 130.81, 3).map((v, i) => 0.6 * (v + 0.5 * square[i])), sampleRate: RATE })
+    const w = buildWavPatch(a, { levels, peaks })
+    expect(show(w.patch, 'osc2type')).toBe('Square')
+    expect(w.patch.get('osc2semi')).toBe(14)
+    expect(Math.abs(w.patch.get('osc2cent'))).toBeLessThanOrEqual(1)
+    expect(w.patch.get('mixerosc2vol')).toBeGreaterThan(512)
+    expect(w.sub).toBe(false)
+    expect(wavStatus(w)).toMatch(/^Play C3: Saw, OSC 2 Square at \+14 semitones/)
+  })
+
+  it('plays a pad’s slow swings on LFO 4: its pitch, WaveScan or the cutoff; its level on Amp LFO 2', () => {
+    const lfo = (rateHz: number, depth: number) => (t: number) => depth * Math.sin(2 * Math.PI * rateHz * t)
+    // Harmonics to 5 kHz: six-second notes of every one take long to make.
+    const saw = sawAmps(130.81, 5000)
+    const pitch = buildWavPatch(analyse({ samples: tone(130.81, saw, 6, { cents: lfo(0.5, 20) }), sampleRate: RATE }), { levels })
+    expect(show(pitch.patch, 'modmatrix9modsource')).toBe('LFO 4')
+    expect(show(pitch.patch, 'modmatrix9modtarget')).toBe('All Osc Pitch')
+    // LFO 4 at half level, the route twice as deep: the Movement macro in its middle plays it as read.
+    expect(played(pitch.patch, 'lfo4level')).toBe(512)
+    expect((pitch.patch.get('modmatrix9depth') - 512) / 4).toBeCloseTo((2 * 20) / CALIBRATION.slow.pitchCentsPerDepth, 0)
+    expect(labelNumber(show(pitch.patch, 'lfo4ratesyncoff'))).toBeCloseTo(0.5, 1)
+    expect(pitch.macros).toContain('Movement')
+    expect(pitch.filterEnvelope).toBe(false)
+    expect(wavStatus(pitch)).toMatch(/pitch swinging (1[6-9]|2[0-4]) cents 0\.5 Hz/)
+
+    // A square fading into a narrow pulse and back: WaveScan between them, LFO 4 Unipolar from the first.
+    const fade = (sign: 1 | -1) => (t: number) => 0.5 + sign * lfo(0.7, 0.5)(t)
+    const [sq, pulse] = [play(cycles[index('Square')]!, 130.81, 6, fade(-1)), play(cycles[index('Pulse 3')]!, 130.81, 6, fade(1))]
+    const scan = buildWavPatch(analyse({ samples: sq.map((v, i) => v + pulse[i]), sampleRate: RATE }), { levels })
+    expect(show(scan.patch, 'osc1mode')).toBe('WaveScan')
+    expect(scan.waves.map((w) => WAVE_FEATURES[w].name)).toEqual(['Square', 'Pulse 3'])
+    expect(show(scan.patch, 'modmatrix8modsource')).toBe('LFO 4 Unipolar')
+    expect(show(scan.patch, 'modmatrix8modtarget')).toBe('Osc 1 WaveScan')
+    expect(wavStatus(scan)).toMatch(/^Play C3: Square ↔ Pulse 3, WaveScan swinging 0\.7 Hz/)
+
+    // A pulse whose width swings from 40 % to 10 % and back: a Saw through Mutant PhazDiff, LFO 4 on its Depth.
+    const width = (t: number) => 0.25 + lfo(0.7, 0.15)(t)
+    let turn = 0
+    let parts: [number, number][] = []
+    const pwm = Float32Array.from({ length: 6 * RATE }, (_, i) => {
+      // All its harmonics (to 15 kHz): the fit reads to 10 kHz.
+      if (i % 256 === 0) parts = sawAmps(130.81).map((_, k) => [(0.6 * Math.sin(Math.PI * (k + 1) * width(i / RATE))) / (k + 1), Math.PI * (k + 1) * width(i / RATE)])
+      turn += (2 * Math.PI * 130.81) / RATE
+      return parts.reduce((v, [amp, shift], k) => v + amp * Math.cos((k + 1) * turn - shift), 0)
+    })
+    const pw = buildWavPatch(analyse({ samples: pwm, sampleRate: RATE }), { levels })
+    expect(show(pw.patch, 'osc1type')).toBe('Saw')
+    expect(show(pw.patch, 'mutant1mode')).toBe('PhazDiff')
+    expect(show(pw.patch, 'modmatrix8modtarget')).toBe('Mut 1 Depth')
+    expect(played(pw.patch, 'mutant1depth') / 1024).toBeCloseTo(0.25, 1)
+    expect(wavStatus(pw)).toMatch(/pulse width swinging (3\d|4\d)–(\d|1\d) % 0\.7 Hz/)
+
+    // A saw whose cutoff swings an octave and a half either side of 4x its pitch.
+    const cutoff = (t: number) => 4 * 2 ** lfo(0.4, 1.5)(t)
+    let phase = 0
+    let gains: number[] = []
+    const swept = Float32Array.from({ length: 6 * RATE }, (_, i) => {
+      // The filter's gains anew every 256 samples (6 ms): smooth enough at 0.4 Hz.
+      if (i % 256 === 0) gains = saw.map((amp, k) => amp * 10 ** (filterDb((k + 1) / cutoff(i / RATE)) / 20))
+      phase += (2 * Math.PI * 130.81) / RATE
+      return gains.reduce((v, g, k) => v + g * Math.sin((k + 1) * phase), 0)
+    })
+    const filter = buildWavPatch(analyse({ samples: swept, sampleRate: RATE }), { levels })
+    expect(show(filter.patch, 'modmatrix8modsource')).toBe('LFO 4')
+    expect(show(filter.patch, 'modmatrix8modtarget')).toBe('Filt 1 Cutoff')
+    // Three octaves between the ends, as far as the ends are read (where the swing is near them); the
+    // route twice as deep as that, LFO 4 at half level.
+    const octavesApart = (((filter.patch.get('modmatrix8depth') - 512) / 4) * CALIBRATION.slow.cutoffOctavesPerDepth) / 2
+    expect(octavesApart).toBeGreaterThan(2)
+    expect(octavesApart).toBeLessThan(3.5)
+    expect(wavStatus(filter)).toMatch(/filter swinging 0\.4 Hz/)
+
+    const level = buildWavPatch(analyse({ samples: tone(130.81, saw, 6, { level: (t) => 0.5 * 10 ** (lfo(0.6, 2)(t) / 20) }), sampleRate: RATE }), { levels })
+    expect(labelNumber(show(level.patch, 'lfo2ratesyncoff'))).toBeCloseTo(0.6, 1)
+    expect(level.patch.get('amplfo2amount')).toBeGreaterThan(512 + 128)
+    expect(wavStatus(level)).toMatch(/level swinging 0\.6 Hz/)
+
+    // None of it with "Follow how the sound changes" off.
+    expect(buildWavPatch(analyse({ samples: tone(130.81, saw, 6, { cents: lfo(0.5, 20) }), sampleRate: RATE }), { levels, overTime: false }).swings).toEqual([])
+  }, 20000)
 })
 
 /** A Sine at `f0` phase-modulated as Mutant FM does (fmModel), at `ratio` and Depth `depth(t)` (raw). */

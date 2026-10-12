@@ -106,7 +106,7 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
       </label>
       <label
         className="speech-dialog__field"
-        title="Waves picked along the note, swept by WaveScan (ENV 3), and the filter following its brightness (ENV 1); with FM, ENV 3 moves its depth instead, and the filter stays put."
+        title="Waves picked along the note, swept by WaveScan (ENV 3), and the filter following its brightness (ENV 1); with FM, ENV 3 moves its depth instead, and the filter stays put. A pad's slow swings on LFO 4 and 5 (pitch, the cutoff or WaveScan), and Amp LFO 2 (level)."
       >
         <input type="checkbox" checked={choices.overTime} onChange={(e) => choose({ overTime: e.target.checked })} />
         Follow how the sound changes
@@ -129,6 +129,11 @@ export function WavPatchDialog({ file, onDone }: { file: File; onDone: () => voi
           <li>
             <strong>Good starting points:</strong> one note of a synth, keys, bass, lead, pad, organ, flute or string machine;
             sung vowels; tonal drums (kicks with their pitch drop, toms, snare bodies).
+          </li>
+          <li>
+            <strong>Pads that move:</strong> a held note's slow swings (pitch, filter, pulse width, level) on LFOs at their rate; a
+            second oscillator at its own interval, a sub or an octave; voices beating a few cents apart. Hold it two seconds or
+            more.
           </li>
           <li>
             <strong>Rough, but usable:</strong> hi-hats, claps, crashes and other noise: the noise source through the filter, any

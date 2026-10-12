@@ -52,8 +52,17 @@ drift, detune and chorus, and builds the patch from the synth's own waves or Mut
 whichever comes closer). Macros (Bright, Timbre, Attack, Release, Dirt, Movement) start where
 the patch is, velocity and aftertouch open the filter.
 
+A held note of two seconds or more is also read as a pad: its slow swings (under 3 Hz) of
+pitch, timbre and level play on LFO 4 and 5 at their rate, the timbre's as the cutoff, as
+WaveScan between the waves at either end, or as a Saw's pulse width (Mutant PhazDiff); the
+level's on Amp LFO 2. Two oscillators a few cents apart beat on OSC 3, three as three voices on
+OSC 1-3; a second oscillator plays on OSC 2 with its own wave: at an interval of its own (a
+fifth, a ninth), a sub one or two octaves down, or an octave up that holds still while the note
+swings, or sits a few cents off. Movement then scales the LFOs.
+
 - **Good starting points:** a single note of a synth, keys, bass, lead, pad, organ, flute or
-  string machine; sung vowels; tonal drums (kicks with their pitch drop, toms, snare bodies).
+  string machine; sung vowels; tonal drums (kicks with their pitch drop, toms, snare bodies);
+  pads that move, held long enough for their swings to repeat (at 0.5 Hz, four seconds).
 - **Rough, but usable:** noise-based percussion and textures (hi-hats, claps, crashes, found
   sounds): the noise source in the nearest colour through the filter, any key plays it.
 - **A single-note stand-in:** chords, bells and other inharmonic sounds, drum loops, and slides
@@ -116,7 +125,7 @@ GitHub Actions. The build uses relative paths (`base: './'`), so it works at any
 - `src/ui/`: which params each module shows, in the synth's page and knob order
   (`layout.ts`), and which ones its pages hide in some modes (`visibility.ts`).
 - `src/audio/`: reading a WAV and analysing the note in it (pitch, harmonics over time,
-  envelope, vibrato); `src/ui/wavPatch.ts` builds a patch from that, on the synth's waves or
+  envelope, vibrato, a pad's slow swings and second oscillator); `src/ui/wavPatch.ts` builds a patch from that, on the synth's waves or
   its Mutant FM (`src/ui/fmModel.ts`), measured on the synth with `tools/calibrateWavPatch.ts`
   and `tools/calibrateMutant.ts`, and compared with the WAV by `tools/scoreWavPatch.ts`.
 - `npm test`: codec, session, schema, speech and audio-analysis tests. With `local/patches`

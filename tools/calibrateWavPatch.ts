@@ -39,8 +39,22 @@
 //              (1.5 s) and the sweep short (0.25 s): WAVs with known resonance in local/wav-tests/rig-res,
 //              for testing a detector
 //   tremolo    a Sine LFO 2 at 4 Hz through Amp LFO 2 Amount +16: dB to either side
+//   slowlfo    slow LFOs as src/audio/movement.ts reads them, a Saw at C3 (6 s): a Sine LFO 4 on All
+//              Osc Pitch at rates 0.2..3 Hz (rate shown against read) and route depths 2..8 (cents to
+//              either side), and on Osc 2 Pitch; on Filt 1 Cutoff (512) at depths 8, 16 (octaves between the ends); LFO 4
+//              Unipolar on Osc 1 WaveScan (Square, Pulse 3) from 0 by a seventh of the range (the
+//              wave at each end); Amp LFO 2 at 0.5 Hz (dB to either side)
+//   pw         Mutant 1 in PW-Orig, PW-Sqeez, PW-ASM and PhazDiff on a Square and a Saw at C3, Depth
+//              0..1024: the pulse width (|sin(pi k w)| / k) fitting the harmonics; then PhazDiff on a
+//              Saw swung by LFO 4 on Mut 1 Depth: the widths at the swing's ends, against expected
+//   padset     held notes (8 s) with known slow movement and second oscillators, WAVs in
+//              local/wav-tests/rig-pads named for what they hold, for testing src/audio/movement.ts and
+//              the oscillator split: none, pitch, cutoff, WaveScan and level swings, a Saw a ninth or
+//              a fifth away, an octave 20 cents off, a detune of a few cents; a sub, an octave steady
+//              beside one swinging, three voices, octaves exact and 5 cents off. A second argument (a
+//              regular expression) records only the takes it matches
 // Usage: npx vite-node tools/calibrateWavPatch.ts <experiment>
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { analyse } from '../src/audio/analyse'
 import { fft } from '../src/audio/fft'
 import { detectPeriod } from '../src/audio/pitch'
@@ -50,7 +64,9 @@ import { initPatchBytes } from '../src/params/initPatch'
 import { Patch, param } from '../src/params/patch'
 import { destinationOf } from '../src/ui/modDestinations'
 import { labelNumber, rawFor } from '../src/ui/timeTables'
-import { lpDb } from '../src/ui/wavPatch'
+import { decodeCycle } from '../src/ui/waveCycles'
+import { harmonicLevels } from '../src/ui/waveSpeech'
+import { distance, lpDb } from '../src/ui/wavPatch'
 import { openSynth } from './synthTake'
 import { RATE } from './waveAudio'
 
@@ -71,6 +87,12 @@ function sawPatch(cutoff = 1024): Patch {
 }
 
 const f32 = (x: Float64Array) => Float32Array.from(x)
+
+/** How far `levels` are from wave `wave`'s harmonics (src/ui/wavPatch.ts distance, open filter). */
+function distanceTo(levels: number[], wave: number): number {
+  const cycles = JSON.parse(readFileSync('public/wave-cycles.json', 'utf8')).waves
+  return distance(levels, harmonicLevels(decodeCycle(cycles[wave].cycle)))
+}
 
 /** dB per harmonic of `x` from 0.3 s to 0.9 s, unnormalised. */
 function harmonicDb(x: Float64Array, f0: number, count: number): number[] {
@@ -517,6 +539,177 @@ export const LADDER_RESPONSE = ${JSON.stringify({ firstRatio: grid[0] / nominal,
         p.set('amplfo2amount', amount)
         const a = analyse({ samples: f32(await synth.take(p, 48, 2)), sampleRate: RATE })
         console.log(`LFO 2 ${show('lfo2ratesyncoff', 600)} Hz, Amp LFO 2 Amount ${show('amplfo2amount', amount)}: ${JSON.stringify(a.tremolo)}`)
+      }
+    } else if (experiment === 'slowlfo') {
+      const lfo4 = (p: Patch, rateHz: number, source = 9 /* LFO 4 */) => {
+        p.set('lfo4wave', 0) // Sine
+        p.set('lfo4bpmsync', 0)
+        p.set('lfo4ratesyncoff', rawFor('lfo4ratesyncoff', rateHz))
+        p.set('lfo4level', 1024)
+        p.set('modmatrix1modsource', source)
+      }
+      const read = async (p: Patch) => analyse({ samples: f32(await synth.take(p, 48, 6)), sampleRate: RATE })
+      for (const [rateHz, depth] of [[0.2, 4], [0.4, 4], [0.75, 4], [1.5, 4], [3, 4], [0.75, 2], [0.75, 8]]) {
+        const p = sawPatch()
+        lfo4(p, rateHz)
+        p.set('modmatrix1modtarget', 19) // All Osc Pitch
+        p.set('modmatrix1depth', 512 + 4 * depth)
+        const m = (await read(p)).movement
+        console.log(`pitch: LFO 4 ${show('lfo4ratesyncoff', rawFor('lfo4ratesyncoff', rateHz))} Hz, depth ${depth}: ${m?.pitch ? `${m.pitch.depth.toFixed(1)} c at ${m.pitch.rateHz.toFixed(2)} Hz` : 'none'}`)
+      }
+      {
+        // On Osc 2 Pitch alone (OSC 1 silent): the same cents per depth as All Osc Pitch?
+        const p = sawPatch()
+        lfo4(p, 0.75)
+        p.set('mixerosc1vol', 0)
+        p.set('osc2type', 3)
+        p.set('mixerosc2vol', 1024)
+        p.set('modmatrix1modtarget', destinationOf('osc2semi')!)
+        p.set('modmatrix1depth', 512 + 4 * 4)
+        const m = (await read(p)).movement
+        console.log(`pitch: LFO 4 on Osc 2 Pitch, depth 4: ${m?.pitch ? `${m.pitch.depth.toFixed(1)} c at ${m.pitch.rateHz.toFixed(2)} Hz` : 'none'}`)
+      }
+      const f0 = hz(48)
+      const open = harmonicDb(await synth.take(sawPatch(), 48, 1), f0, 64)
+      for (const depth of [8, 16]) {
+        const p = sawPatch(512)
+        lfo4(p, 0.5)
+        p.set('modmatrix1modtarget', destinationOf('filter1cutoff')!)
+        p.set('modmatrix1depth', 512 + 4 * depth)
+        const t = (await read(p)).movement?.timbre
+        if (!t) {
+          console.log(`cutoff: depth ${depth}: no swing read`)
+          continue
+        }
+        const [lo, hi] = [fitCutoffRatio(t.low, open.slice(0, t.low.length)), fitCutoffRatio(t.high, open.slice(0, t.high.length))]
+        console.log(`cutoff: depth ${depth} at ${t.rateHz.toFixed(2)} Hz: ${lo.ratio.toFixed(2)}x to ${hi.ratio.toFixed(2)}x, ${Math.abs(Math.log2(hi.ratio / lo.ratio)).toFixed(2)} octaves (fits ${lo.rms.toFixed(1)}, ${hi.rms.toFixed(1)} dB)`)
+      }
+      {
+        const p = sawPatch()
+        p.set('osc1mode', 1)
+        p.set('osc1wavscan', 0)
+        p.set('osc1wavscanwave1', 4) // Square
+        p.set('osc1wavscanwave2', 7 + 2) // Pulse 3
+        for (let slot = 3; slot <= 8; slot++) p.set(`osc1wavscanwave${slot}`, 0)
+        lfo4(p, 0.5, 14 /* LFO 4 Unipolar */)
+        p.set('modmatrix1modtarget', destinationOf('osc1wavscan')!)
+        p.set('modmatrix1depth', 512 + 4 * 18.25)
+        const t = (await read(p)).movement?.timbre
+        const wave = (levels: number[]) => [4, 7].map((w) => `${w === 4 ? 'Square' : 'Pulse 3'} ${distanceTo(levels, w).toFixed(1)} dB`).join(', ')
+        console.log(t ? `wavescan at ${t.rateHz.toFixed(2)} Hz: low end ${wave(t.low)}; high end ${wave(t.high)}` : 'wavescan: no swing read')
+      }
+      {
+        const p = sawPatch()
+        p.set('lfo2wave', 0)
+        p.set('lfo2bpmsync', 0)
+        p.set('lfo2ratesyncoff', rawFor('lfo2ratesyncoff', 0.5))
+        p.set('lfo2level', 1024)
+        p.set('amplfo2amount', 768)
+        const m = (await read(p)).movement
+        console.log(`level: Amp LFO 2 Amount ${show('amplfo2amount', 768)} at 0.5 Hz: ${m?.level ? `${m.level.depth.toFixed(1)} dB at ${m.level.rateHz.toFixed(2)} Hz` : 'none'}`)
+      }
+    } else if (experiment === 'pw') {
+      const pulses = Array.from({ length: 49 }, (_, i) => {
+        const w = (i + 2) / 100
+        const amps = Array.from({ length: 128 }, (_, k) => Math.abs(Math.sin(Math.PI * (k + 1) * w)) / (k + 1))
+        const top = Math.max(...amps)
+        return { w, levels: amps.map((a) => 20 * Math.log10(a / top + 1e-5)) }
+      })
+      const width = (levels: number[]) => pulses.reduce((b, p) => (distance(levels, p.levels) < b.fit ? { w: p.w, fit: distance(levels, p.levels) } : b), { w: 0, fit: Infinity })
+      const mutant = (wave: number, mode: number, depth: number) => {
+        const p = sawPatch()
+        p.set('osc1type', wave)
+        p.set('mutant1mode', mode)
+        p.set('mutant1wet', 1024)
+        p.set('mutant1depth', depth)
+        return p
+      }
+      for (const [wave, name] of [[4, 'Square'], [3, 'Saw']] as const)
+        for (const mode of [3, 4, 5, 7]) {
+          const row: string[] = []
+          for (const depth of [0, 256, 512, 768, 1024]) {
+            const h = harmonicsAt(f32(await synth.take(mutant(wave, mode, depth), 48, 1)), RATE, hz(48), 0.3 * RATE, 0.9 * RATE, 16)
+            const w = width(h.levels)
+            row.push(`${depth}: ${(100 * w.w).toFixed(1)} % (${w.fit.toFixed(1)} dB)`)
+          }
+          console.log(`${name}, ${show('mutant1mode', mode)}: ${row.join(', ')}`)
+        }
+      for (const [centre, depth, level] of [[271, 37, 512], [271, 18.5, 1024]]) {
+        const p = mutant(3, 7, centre)
+        p.set('lfo4wave', 0)
+        p.set('lfo4bpmsync', 0)
+        p.set('lfo4ratesyncoff', rawFor('lfo4ratesyncoff', 0.7))
+        p.set('lfo4level', level)
+        p.set('modmatrix1modsource', 9) // LFO 4
+        p.set('modmatrix1modtarget', destinationOf('mutant1depth')!)
+        p.set('modmatrix1depth', Math.round(512 + 4 * depth))
+        const t = analyse({ samples: f32(await synth.take(p, 48, 6)), sampleRate: RATE }).movement?.timbre
+        const swing = (8 * depth * level) / 1024
+        console.log(`PhazDiff ${centre} swung by depth ${depth} at LFO level ${level}: ends ${t ? `${(100 * width(t.low).w).toFixed(0)} % and ${(100 * width(t.high).w).toFixed(0)} %` : 'none'}, expected ${((100 * (centre - swing)) / 1024).toFixed(0)}-${((100 * (centre + swing)) / 1024).toFixed(0)} %`)
+      }
+    } else if (experiment === 'padset') {
+      const dir = 'local/wav-tests/rig-pads'
+      mkdirSync(dir, { recursive: true })
+      const lfo = (p: Patch, rateHz: number, source: number, key: string, depth: number) => {
+        p.set('lfo4wave', 0) // Sine
+        p.set('lfo4bpmsync', 0)
+        p.set('lfo4ratesyncoff', rawFor('lfo4ratesyncoff', rateHz))
+        p.set('lfo4level', 1024)
+        p.set('modmatrix1modsource', source)
+        p.set('modmatrix1modtarget', key === 'allosc' ? 19 : destinationOf(key)!)
+        p.set('modmatrix1depth', 512 + 4 * depth)
+      }
+      const osc2 = (p: Patch, wave: number, semi: number, cents: number, vol = 1024) => {
+        p.set('osc2type', wave)
+        p.set('osc2semi', semi)
+        p.set('osc2cent', cents)
+        p.set('mixerosc2vol', vol)
+      }
+      const scan = (p: Patch) => {
+        p.set('osc1mode', 1)
+        p.set('osc1wavscan', 0)
+        p.set('osc1wavscanwave1', 4) // Square
+        p.set('osc1wavscanwave2', 7 + 2) // Pulse 3
+        for (let slot = 3; slot <= 8; slot++) p.set(`osc1wavscanwave${slot}`, 0)
+      }
+      const takes: [string, number, (p: Patch) => void][] = [
+        ['still-saw', 48, () => {}],
+        ['still-saw', 36, () => {}],
+        ['still-dark', 48, (p) => p.set('filter1cutoff', 448)],
+        ['pitch-0.5hz-10c', 48, (p) => lfo(p, 0.5, 9, 'allosc', 1)],
+        ['pitch-0.8hz-20c', 48, (p) => lfo(p, 0.8, 9, 'allosc', 2)],
+        ['cutoff-0.4hz-d6', 48, (p) => (p.set('filter1cutoff', 512), lfo(p, 0.4, 9, 'filter1cutoff', 6))],
+        ['cutoff-1.2hz-d12', 36, (p) => (p.set('filter1cutoff', 512), lfo(p, 1.2, 9, 'filter1cutoff', 12))],
+        ['scan-0.7hz', 48, (p) => (scan(p), lfo(p, 0.7, 14, 'osc1wavscan', 18.25))],
+        ['level-0.6hz-a24', 48, (p) => {
+          p.set('lfo2wave', 0)
+          p.set('lfo2bpmsync', 0)
+          p.set('lfo2ratesyncoff', rawFor('lfo2ratesyncoff', 0.6))
+          p.set('lfo2level', 1024)
+          p.set('amplfo2amount', 512 + 24 * 8)
+        }],
+        ['osc2-saw-m14+8', 60, (p) => osc2(p, 3, -14, 8)],
+        ['osc2-square-p7', 48, (p) => osc2(p, 4, 7, 0, 768)],
+        ['osc2-saw-p12+20', 48, (p) => osc2(p, 3, 12, 20, 768)],
+        ['detune-saw-4c', 48, (p) => osc2(p, 3, 0, 4)],
+        ['osc2-saw-m14+8-scan-0.7hz', 60, (p) => (osc2(p, 3, -14, 8), scan(p), lfo(p, 0.7, 14, 'osc1wavscan', 18.25))],
+        // Oscillators an octave or two apart, which share harmonics: a sub, one steady beside one
+        // swinging, three voices a few cents apart, octaves exact (one timbre) and 5 cents off.
+        ['sub-saw-m24', 48, (p) => osc2(p, 3, -24, 0, 640)],
+        ['sub-square-m12', 48, (p) => osc2(p, 4, -12, 0, 768)],
+        ['octave-steady-p12-swing', 48, (p) => (p.set('osc1type', 4), osc2(p, 3, 12, 0, 896), lfo(p, 0.9, 9, 'osc1semi', 4))],
+        ['voices-m3-0-p5', 60, (p) => (p.set('osc1cent', -3), osc2(p, 3, 0, 0), p.set('osc3type', 3), p.set('osc3semi', 0), p.set('osc3cent', 5), p.set('mixerosc3vol', 1024))],
+        ['octave-p12', 48, (p) => osc2(p, 3, 12, 0, 768)],
+        ['octave-p12+5', 48, (p) => osc2(p, 3, 12, 5, 768)],
+      ]
+      const only = process.argv[3] ? new RegExp(process.argv[3]) : null
+      for (const [name, note, set] of takes) {
+        if (only && !only.test(name)) continue
+        const p = sawPatch()
+        set(p)
+        await synth.take(p, note, 8)
+        copyFileSync(FILE, `${dir}/${name}-${note}.wav`)
+        console.log(`${name}-${note}`)
       }
     } else {
       console.log('Usage: npx vite-node tools/calibrateWavPatch.ts cutoff|envamount|filterenv|amp|vibrato|velocity|tremolo')

@@ -3,7 +3,8 @@
 // (plain dB RMS of the first 32, floored at -60: fixed, whatever weighting the fit uses), octave bands
 // (for noise, where harmonics mean nothing), brightness over time, the level's shape, pitch and wobble. The
 // recordings go to local/wav-patches/<name>-<envelope>.wav, and the WAV then the synth in one file
-// to local/wav-patches/ab/, for listening.
+// to local/wav-patches/ab/, for listening. Up to 8 s of a held note; a pad's slow swings and second
+// oscillator compared too.
 // Usage: npx vite-node tools/scoreWavPatch.ts <file.wav>... [--source waves|fm|auto] [--envelope detect|pluck|keys|pad] [--steady]
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
@@ -63,7 +64,7 @@ async function main() {
       const target = analyse(parseWav(readFileSync(file)))
       const name = basename(file, '.wav')
       const built = buildWavPatch(target, { levels, peaks, source, envelope, overTime: !args.includes('--steady'), name })
-      const hold = Math.min(6, Math.max(1, (target.held ? target.endS : target.endS - target.adsr.releaseS) - target.onsetS))
+      const hold = Math.min(8, Math.max(1, (target.held ? target.endS : target.endS - target.adsr.releaseS) - target.onsetS))
       // The Mod Wheel down (the synth keeps where it was last sent): it brings in the vibrato.
       const x = await synth.take(built.patch, target.midi, hold, [[0, 'cc1', 0]])
       const out = `${OUT}/${name}-${source}-${envelope}${args.includes('--steady') ? '-steady' : ''}.wav`
@@ -95,6 +96,21 @@ async function main() {
         `drift ${d.drift.toFixed(1)} c, detune ${d.detune ? `${d.detune.cents.toFixed(1)} c` : '-'}, chorus ${d.chorus ? `${d.chorus.cents.toFixed(1)} c ${d.chorus.beat.toFixed(1)} dB` : '-'}, noise ${d.noise ? `${d.noise.db.toFixed(0)} dB ${d.noise.slope.toFixed(1)}/oct` : '-'}`
       console.log(`  dirt: wav ${dirt(target.dirt)} / synth ${dirt(got.dirt)}`)
       console.log(`  pitch ${target.f0.toFixed(1)} / ${got.f0.toFixed(1)} Hz, vibrato ${JSON.stringify(target.vibrato)} / ${JSON.stringify(got.vibrato)}, tremolo ${JSON.stringify(target.tremolo)} / ${JSON.stringify(got.tremolo)}`)
+      const swing = (m: SoundAnalysis['movement']) =>
+        m
+          ? [
+              m.pitch && `pitch ${m.pitch.depth.toFixed(0)} c ${m.pitch.rateHz.toFixed(2)} Hz`,
+              m.beat && `beat ${m.beat.rateHz.toFixed(2)} Hz`,
+              m.level && `level ${m.level.depth.toFixed(1)} dB ${m.level.rateHz.toFixed(2)} Hz`,
+              m.timbre && `timbre ${m.timbre.rateHz.toFixed(2)} Hz`,
+            ]
+              .filter(Boolean)
+              .join(', ')
+          : '-'
+      console.log(`  slow swings: wav ${swing(target.movement)} / synth ${swing(got.movement)}`)
+      const other = (o: SoundAnalysis['second']) => (o ? `${o.kind} ${o.semitones.toFixed(2)} st ${o.db.toFixed(1)} dB` : '-')
+      if (target.second || got.second) console.log(`  second oscillator: wav ${other(target.second)} / synth ${other(got.second)}`)
+      if (target.voices || got.voices) console.log(`  voices: wav ${target.voices?.map((v) => v.cents.toFixed(1)).join(' ') ?? '-'} / synth ${got.voices?.map((v) => v.cents.toFixed(1)).join(' ') ?? '-'} cents`)
       console.log(`  -> ${out}`)
     }
   } finally {

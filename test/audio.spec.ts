@@ -291,3 +291,90 @@ describe('glide', () => {
   })
 })
 
+
+describe('pads', () => {
+  const at = (x: Float32Array) => analyse({ samples: x, sampleRate: RATE })
+  /** `xs` together, at half their level each (two saws at full would clip). */
+  const mix = (...xs: Float32Array[]) => xs[0].map((_, i) => 0.5 * xs.reduce((s, x) => s + x[i], 0))
+  /** A square's harmonics: the odd ones, 1/k. */
+  const squareAmps = (f0: number) => sawAmps(f0).map((a, k) => (k % 2 === 0 ? a : 0))
+  const sine = (rateHz: number, depth: number) => (t: number) => depth * Math.sin(2 * Math.PI * rateHz * t)
+
+  it('splits two oscillators apart by an interval, each at its own pitch', () => {
+    // A ninth apart, as the SYS-100M's 4AM: they repeat together only every 29 Hz.
+    const ninth = at(mix(tone(261.63, sawAmps(261.63), 3), tone(117.4, sawAmps(117.4), 3, { level: () => 0.8 })))
+    expect(noteName(ninth.midi)).toBe('C4')
+    expect(ninth.second!.semitones).toBeCloseTo(12 * Math.log2(117.4 / 261.63), 1)
+    expect(ninth.warnings).toEqual([])
+    // A square a fifth up: its 2nd and 4th harmonics lie on the saw's 3rd and 6th, not known (NaN);
+    // its own, the odd ones, as a square's.
+    const fifth = at(mix(tone(130.81, sawAmps(130.81), 3), tone(196, squareAmps(196), 3, { level: () => 0.7 })))
+    expect(noteName(fifth.midi)).toBe('C3')
+    expect(fifth.second!.semitones).toBeCloseTo(7, 1)
+    const own = fifth.second!.levels
+    expect([own[1], own[3]].every(Number.isNaN)).toBe(true)
+    expect(own[2]).toBeCloseTo(20 * Math.log10(1 / 3), 0)
+    expect(own[4]).toBeCloseTo(20 * Math.log10(1 / 5), 0)
+  })
+
+  it('keeps one oscillator: a saw alone, a detune a few cents off, an octave on top', () => {
+    expect(at(tone(130.81, sawAmps(130.81), 3)).second).toBeNull()
+    expect(at(mix(tone(130.81, sawAmps(130.81), 3), tone(130.81 * 2 ** (4 / 1200), sawAmps(130.81), 3))).second).toBeNull()
+    expect(at(mix(tone(130.81, sawAmps(130.81), 3), tone(261.63, sawAmps(261.63), 3))).second).toBeNull()
+  })
+
+  it('reads a pad’s slow swings: pitch, level and timbre, and none in a still note', () => {
+    const pitch = at(tone(130.81, sawAmps(130.81), 6, { cents: sine(0.5, 15) })).movement!
+    expect(pitch.pitch!.rateHz).toBeCloseTo(0.5, 1)
+    expect(pitch.pitch!.depth).toBeGreaterThan(12)
+    expect(pitch.pitch!.depth).toBeLessThan(18)
+    expect(pitch.timbre).toBeNull()
+    const level = at(tone(130.81, sawAmps(130.81), 6, { level: (t) => 0.5 * 10 ** (sine(0.6, 2)(t) / 20) })).movement!
+    expect(level.level!.rateHz).toBeCloseTo(0.6, 1)
+    expect(level.level!.depth).toBeGreaterThan(1.5)
+    expect(level.level!.depth).toBeLessThan(2.5)
+    expect(level.pitch).toBeNull()
+    // A saw fading into a square and back, 0.7 times a second.
+    const fade = (sign: 1 | -1) => (t: number) => 0.5 + sign * sine(0.7, 0.45)(t)
+    const timbre = at(mix(tone(130.81, sawAmps(130.81), 6, { level: fade(1) }), tone(130.81, squareAmps(130.81), 6, { level: fade(-1) }))).movement!
+    expect(timbre.timbre!.rateHz).toBeCloseTo(0.7, 1)
+    // The square's end: its even harmonics well under the saw's.
+    expect(timbre.timbre!.low[1] - timbre.timbre!.high[1]).toBeLessThan(-10)
+    expect(at(tone(130.81, sawAmps(130.81), 6)).movement).toBeNull()
+  })
+
+  it('hears a sub under the note, an octave that behaves apart, and voices a few cents apart', () => {
+    // A saw at C3 over a quieter one two octaves down, its pitch swinging so the two don't repeat
+    // together (a louder sub, or one that holds with it, is read as the note: its one wave plays both).
+    const swing = (t: number) => 15 * Math.sin(2 * Math.PI * 0.7 * t)
+    const sub = at(mix(tone(130.81, sawAmps(130.81), 4, { cents: swing }), tone(32.7, sawAmps(32.7), 4, { level: () => 0.2 })))
+    expect(sub.second!.kind).toBe('sub')
+    expect(sub.second!.semitones).toBe(-24)
+    // A square swinging 40 cents under a steady saw an octave up: the swing is the square's alone.
+    const octave = at(mix(tone(130.81, squareAmps(130.81), 4, { cents: (t) => 40 * Math.sin(2 * Math.PI * 0.9 * t) }), tone(261.63, sawAmps(261.63), 4)))
+    expect(octave.second!.kind).toBe('octave')
+    expect(octave.second!.semitones).toBeCloseTo(12, 1)
+    expect(octave.movement!.pitch!.depth).toBeGreaterThan(30)
+    // An octave 20 cents sharp beats against the note's even harmonics.
+    const sharp = at(mix(tone(130.81, sawAmps(130.81), 4), tone(261.63 * 2 ** (20 / 1200), sawAmps(261.63), 4, { level: () => 0.7 })))
+    expect(sharp.second!.semitones).toBeCloseTo(12.2, 1)
+    // An octave exactly on is a timbre, not an oscillator.
+    expect(at(mix(tone(130.81, sawAmps(130.81), 4), tone(261.63, sawAmps(261.63), 4))).second).toBeNull()
+    // Three saws at -3, 0 and +5 cents.
+    const voices = at(mix(...[-3, 0, 5].map((c) => tone(261.63 * 2 ** (c / 1200), sawAmps(261.63), 6))))
+    expect(voices.voices!.map((v) => Math.round(v.cents - voices.voices![1].cents))).toEqual([-3, 0, 5])
+  }, 20000)
+
+  it('hears two oscillators a few cents apart beating, not swinging', () => {
+    const a = at(mix(tone(130.81, sawAmps(130.81), 8), tone(130.81 * 2 ** (4 / 1200), sawAmps(130.81), 8)))
+    expect(a.movement!.beat!.rateHz).toBeCloseTo(130.81 * (2 ** (4 / 1200) - 1), 1)
+    expect(a.movement!.level).toBeNull()
+    expect(a.movement!.timbre).toBeNull()
+  })
+
+  it('holds a pad’s sustain through a slow swing of its level, and reads no swing in a decay', () => {
+    const swinging = tone(130.81, sawAmps(130.81), 6, { level: (t) => 0.5 * 10 ** (sine(0.5, 3)(t) / 20) * (t > 5.5 ? Math.max(0, 1 - (t - 5.5) / 0.2) : 1) })
+    expect(at(swinging).adsr.sustain).toBeGreaterThan(0.5)
+    expect(at(tone(130.81, sawAmps(130.81), 6, { level: (t) => Math.exp(-t / 1.5) * 10 ** (sine(0.6, 2)(t) / 20) })).movement).toBeNull()
+  })
+})
