@@ -440,10 +440,20 @@ function envelopeOfTrack(times: number[], raw: number[], startS: number, least: 
   const span = track[top] - base
   if (span < least) return null
   const fall = track[top] - end
-  const half = track.findIndex((v, i) => i > top && track[top] - v >= 0.5 * fall)
-  const decayS = fall > 0 && half > 0 ? 2 * (times[half] - times[top]) : 0
-  return { track, base, span, attackS: times[top] - startS, decayS, sustain: (end - base) / span }
+  // Held at the top (within HOLD_SHARE of the fall) before it falls: a pluck stays bright a frame or
+  // three, then darkens fast; a fall from the top straight away is dull where it's brightest.
+  let held = top
+  while (fall > 0 && held + 1 < track.length && track[top] - track[held + 1] <= HOLD_SHARE * fall) held++
+  const half = track.findIndex((v, i) => i > held && track[top] - v >= 0.5 * fall)
+  const decayS = fall > 0 && half > 0 ? 2 * (times[half] - times[held]) : 0
+  return { track, base, span, attackS: times[top] - startS, holdS: times[held] - times[top], decayS, sustain: (end - base) / span }
 }
+
+/** A vibrato this deep (cents) is one, even where an ensemble plays: its sweep reads shallower. */
+const ENSEMBLE_VIBRATO_CENTS = 16
+
+/** How close to its top (share of the fall) an envelope's track counts as still held there. */
+const HOLD_SHARE = 0.1
 
 /** The FM Ratio, Depth and cutoff (x pitch) closest to `target`; `ratio` and `cutoff` fix those. */
 export function fitFm(target: number[], ratio?: number, cutoff?: number): { ratio: number; ratioRaw: number; depth: number; cutoff: number; fit: number } {
@@ -525,11 +535,11 @@ const SUB_GAP = 6
 const SCAN_GAIN = 1.5
 
 /** ENV n's times and sustain for `adsr`: on the Amp (`amp`) or the filter, as measured on each. */
-function setEnvelope(p: Patch, n: number, adsr: Adsr, amp: boolean) {
+function setEnvelope(p: Patch, n: number, adsr: Adsr & { holdS?: number }, amp: boolean) {
   const env = `env${n}`
   p.set(`${env}bpmsync`, 0)
   p.set(`${env}attacksyncoff`, rawFor(`${env}attacksyncoff`, adsr.attackS * 1000))
-  p.set(`${env}holdsyncoff`, 0)
+  p.set(`${env}holdsyncoff`, adsr.holdS ? rawFor(`${env}holdsyncoff`, adsr.holdS * 1000) : 0)
   const decay = amp ? CALIBRATION.ampDecayFactor : CALIBRATION.envDecayFactor
   p.set(`${env}decaysyncoff`, rawFor(`${env}decaysyncoff`, (adsr.decayS * 1000) / decay))
   p.set(`${env}sustain`, clamp(Math.round(adsr.sustain * 1024)))
@@ -663,7 +673,7 @@ export function buildWavPatch(
     if (moves) {
       fm = { ratio, depth: moves.base, envelope: true }
       p.set('mutant1depth', moves.base)
-      setEnvelope(p, 3, { attackS: moves.attackS, decayS: moves.decayS, sustain: moves.sustain, releaseS: 0.1 }, false)
+      setEnvelope(p, 3, { attackS: moves.attackS, holdS: moves.holdS, decayS: moves.decayS, sustain: moves.sustain, releaseS: 0.1 }, false)
       route(p, 1, 3 /* Env 3 */, 'mutant1depth', moves.span / CALIBRATION.routeRawPerDepth)
     }
   } else {
@@ -723,9 +733,8 @@ export function buildWavPatch(
       // ENV 1 from the lower end's cutoff up by the span; Env 1 Amount scales a full envelope.
       filterEnvelope = true
       p.set('filter1cutoff', cutoffRaw(2 ** bright.base, a.f0, a.midi))
-      const lift = (bright.span * CALIBRATION.cutoff.octaveRaw) / CALIBRATION.envAmountCutoffRaw
-      p.set('filter1env1amount', clamp(Math.round(512 + lift), 512))
-      setEnvelope(p, 1, { attackS: bright.attackS, decayS: bright.decayS, sustain: bright.sustain, releaseS: 0.1 }, false)
+      p.set('filter1env1amount', envAmount(bright.span))
+      setEnvelope(p, 1, { attackS: bright.attackS, holdS: bright.holdS, decayS: bright.decayS, sustain: bright.sustain, releaseS: 0.1 }, false)
     }
     const cutoffs = bright ? bright.track.map((o) => 2 ** o) : sounding(a).map(() => cutoff)
     const scan = scanWaves(a, levels, cutoffs, wave, resonance)
@@ -834,7 +843,8 @@ export function buildWavPatch(
   const dirty = dirt && (!a.second || a.second.kind === 'sub')
   // Voices a few cents apart beat like a chorus: they play as voices, not as an ensemble.
   const ensemble = dirty && !a.voices && !!a.dirt.chorus && !a.warnings.includes('inharmonic or noisy')
-  const vibrato = wobble && !ensemble ? a.vibrato : null
+  // Yet a vibrato deeper than any ensemble's sweep reads (VP-330s and the synth's own: 15 cents at most) is one.
+  const vibrato = wobble && (!ensemble || (a.vibrato?.depth ?? 0) >= ENSEMBLE_VIBRATO_CENTS) ? a.vibrato : null
   // Nor is the beat of voices, or of an octave a few cents off, a tremolo: they play it.
   const beating = !!a.voices || (a.second?.kind === 'octave' && a.second.semitones !== 12)
   const tremolo = wobble && !ensemble && !beating ? a.tremolo : null
@@ -1081,8 +1091,8 @@ function buildNoisePatch(a: SoundAnalysis, { envelope = 'detect', overTime = tru
     // The fitted cutoff is the peak's; the envelope's lower end sits as far under it as the centroid does.
     const atPeak = Math.log2(loud.reduce((x, f) => (Math.abs(f.t - a.peakS) < Math.abs(x.t - a.peakS) ? f : x)).hz)
     p.set('filter1cutoff', clamp(Math.round(p.get('filter1cutoff') + (moves.base - atPeak) * CALIBRATION.cutoff.octaveRaw)))
-    p.set('filter1env1amount', clamp(Math.round(512 + (moves.span * CALIBRATION.cutoff.octaveRaw) / CALIBRATION.envAmountCutoffRaw), 512))
-    setEnvelope(p, 1, { attackS: moves.attackS, decayS: moves.decayS, sustain: moves.sustain, releaseS: 0.1 }, false)
+    p.set('filter1env1amount', envAmount(moves.span))
+    setEnvelope(p, 1, { attackS: moves.attackS, holdS: moves.holdS, decayS: moves.decayS, sustain: moves.sustain, releaseS: 0.1 }, false)
   }
   setEnvelope(p, 2, ENVELOPES.find((e) => e.value === envelope)?.adsr ?? a.adsr, true)
   const macros = finish(p, filterEnvelope, RESONANCE, filterEnvelope ? 'filter1env1amount' : null)
@@ -1117,6 +1127,16 @@ function buildNoisePatch(a: SoundAnalysis, { envelope = 'detect', overTime = tru
  * tools/calibrateWavPatch.ts velocity.
  */
 const PLAYING = { ampVelocity: 48, filterVelocity: 24, velocityCutoff: 16, aftertouchCutoff: 12 }
+
+/**
+ * Env 1 Amount (raw) sweeping the cutoff `span` octaves at velocity 100, as the recording is taken
+ * to be played: Filter 1 Vel Env scales the envelope linearly with velocity, full at 127 (+24 of 64
+ * left a 3.5-octave sweep 0.2-0.3 short at 100, ~8 %).
+ */
+function envAmount(span: number): number {
+  const atVelocity = 1 - (PLAYING.filterVelocity / 64) * (1 - 100 / 127)
+  return clamp(Math.round(512 + (span * CALIBRATION.cutoff.octaveRaw) / CALIBRATION.envAmountCutoffRaw / atVelocity), 512)
+}
 
 /**
  * Macro `n`, named `name`, on `key`: the knob moves it over `span` raw (a macro at depth d moves its

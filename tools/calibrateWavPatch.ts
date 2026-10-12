@@ -1,7 +1,7 @@
 // Measures on the synth what src/ui/wavPatch.ts relies on (its CALIBRATION): per experiment, a
 // patch from Init into H128's working memory (no flash write), one held note, recorded from the
 // default audio input (the synth on inputs 1/2 of an X18) with sox, analysed by src/audio.
-//   cutoff     a Saw through LP Ladder 12 (keytrack 100 %, resonance 0) at Cutoffs 256..768 and
+//   cutoff     a Saw through LP Ladder 12 (keytrack 100 %, resonance 0) at Cutoffs 256..768 (env RAWS: others) and
 //              notes C2, C3, C4: the cutoff (Hz) that fits each, against the Saw unfiltered
 //   envamount  the same at Cutoff 256 with ENV 1 held full (Sustain 128), Env 1 Amount 0..+64:
 //              cutoff raw moved per raw of amount
@@ -129,7 +129,7 @@ async function main() {
   try {
     if (experiment === 'cutoff' || experiment === 'envamount') {
       const notes = experiment === 'cutoff' ? [36, 48, 60] : [48]
-      const raws = experiment === 'cutoff' ? [256, 384, 512, 640, 768] : [576, 640, 768, 896, 1024]
+      const raws = process.env.RAWS ? process.env.RAWS.split(',').map(Number) : experiment === 'cutoff' ? [256, 384, 512, 640, 768] : [576, 640, 768, 896, 1024]
       for (const note of notes) {
         const f0 = hz(note)
         const count = Math.min(128, Math.floor(16000 / f0))
@@ -143,7 +143,13 @@ async function main() {
             p.set('env1sustain', 1024)
             p.set('filter1env1amount', raw)
           }
-          const fit = fitCutoffRatio(harmonicDb(await synth.take(p, note, 1), f0, count), open)
+          // Held 2 s: a take starts where it first passes 0.01, late for a low cutoff's quiet note.
+          const x = await synth.take(p, note, 2)
+          if (x.length < 1.0 * RATE) {
+            rows.push(`${experiment === 'cutoff' ? 'cutoff' : 'amount'} ${raw}: too quiet to read`)
+            continue
+          }
+          const fit = fitCutoffRatio(harmonicDb(x, f0, count), open)
           rows.push(`${experiment === 'cutoff' ? 'cutoff' : 'amount'} ${raw} (${show(experiment === 'cutoff' ? 'filter1cutoff' : 'filter1env1amount', raw)}): ${(fit.ratio * f0).toFixed(0)} Hz, ${fit.ratio.toFixed(2)}x, fit ${fit.rms.toFixed(1)} dB`)
         }
         console.log(`note ${note} (${f0.toFixed(1)} Hz)\n  ${rows.join('\n  ')}`)
