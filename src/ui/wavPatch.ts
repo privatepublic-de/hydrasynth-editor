@@ -410,7 +410,18 @@ const sounding = (a: SoundAnalysis) => a.frames.filter((f) => f.db > -24)
  * it moves less than half an octave.
  */
 function brightness(a: SoundAnalysis, levels: number[], resonance = 0) {
-  return envelopeOf(a, (f) => octaves(bestCutoff(f.harmonics.levels, levels, RATIOS, resonance).cutoff), 0.5)
+  const cutoffOf = (h: number[]) => octaves(bestCutoff(h, levels, RATIOS, resonance).cutoff)
+  const frames = sounding(a)
+  const times = frames.map((f) => f.t)
+  const track = frames.map((f) => cutoffOf(f.harmonics.levels))
+  const sweep = envelopeOfTrack(times, track, a.onsetS, 0.5)
+  // A sweep falling from the onset starts brighter than its first frame (40 ms) shows: from the
+  // attack's reading where that's brighter. Not where the frames find no such sweep: a click
+  // at the onset reads bright too.
+  // The track stays the frames' own: WaveScan fits each frame's wave through its cutoff.
+  if (!sweep || sweep.attackS > 0.01 || a.attack.levels.length <= 3) return sweep
+  const brighter = envelopeOfTrack(times, [Math.max(track[0], cutoffOf(a.attack.levels)), ...track.slice(1)], a.onsetS, 0.5)
+  return brighter && { ...brighter, track: sweep.track }
 }
 
 /**

@@ -55,6 +55,11 @@ export interface SoundAnalysis {
   brightness: { t: number; hz: number; db: number }[]
   /** The harmonics every FRAME_S from onset to end (at most MAX_FRAMES_S of it). */
   frames: Snapshot[]
+  /**
+   * The harmonics of the first ATTACK_PERIODS periods from the onset: a pluck's filter sweep is at
+   * its brightest for 10-20 ms, which a frame (centred on the onset, 40 ms or more) reads far darker.
+   */
+  attack: Harmonics
   adsr: Adsr
   vibrato: Wobble | null
   tremolo: Wobble | null
@@ -88,6 +93,8 @@ const PAD = { heldS: 2, sustain: 0.25 }
 /** What a sound with no repeat in it gets as its note: middle C. */
 const NO_NOTE_HZ = 261.63
 const FRAME_S = 0.04
+/** Periods read for the attack's harmonics: three scatter, six already miss most of a fast sweep. */
+const ATTACK_PERIODS = 4
 /** Timbre over time is followed for the first few seconds: WaveScan and the filter's envelope settle by then. */
 const MAX_FRAMES_S = 4
 const WOBBLE_HOP_S = 0.02
@@ -244,6 +251,7 @@ export function analyse(audio: Audio): SoundAnalysis {
     bands: octaveBands(x, sr, at(ip)),
     brightness: centroidTrack(x, sr, at(onset), Math.min(at(iEnd), at(onset) + MAX_FRAMES_S * sr)),
     frames,
+    attack: harmonicsAt(x, sr, f0At(at(onset)), at(onset), Math.min(x.length, at(onset) + ATTACK_PERIODS * (sr / f0At(at(onset)))), harmonicCount(f0At(at(onset)), sr)),
     // The attack on the finer curve: two periods of a low note would smear a fast one.
     adsr,
     vibrato,
