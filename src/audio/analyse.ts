@@ -413,8 +413,13 @@ function secondOf(x: Float32Array, sampleRate: number, f0: number, f1: number, f
  */
 function glideOf(track: { t: number; period: number }[], crossings: { t: number; period: number }[], period: number, onsetS: number, sampleRate: number) {
   let clear = track.filter((s) => Number.isFinite(s.period))
-  if (!clear.length || clear[0].t > onsetS + 0.02)
-    clear = [...crossings.filter((c) => c.t < (clear[0]?.t ?? Infinity) && c.period > period / 4 && c.period < period * 1.5), ...clear]
+  if (!clear.length || clear[0].t > onsetS + 0.02) {
+    const before = crossings.filter((c) => c.t < (clear[0]?.t ?? Infinity) && c.period > period / 4 && c.period < period * 1.5)
+    // Only where they lead into the follower's first reading (within 3 semitones): a bright attack's
+    // upper harmonics cross zero too, and read as a pitch far above the one it slides up from.
+    const joins = !clear.length || (before.length > 0 && Math.abs(12 * Math.log2(before[before.length - 1].period / clear[0].period)) <= 3)
+    if (joins) clear = [...before, ...clear]
+  }
   if (clear.length < 4) return null
   // Where it settles: the last stretch of 0.15 s or more within a third of a semitone (a slide's end,
   // not the middle of it where its level peaked); for a note too short to hold that long, `period`.
