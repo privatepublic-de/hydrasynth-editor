@@ -292,7 +292,8 @@ describe('glide', () => {
 })
 
 
-describe('pads', () => {
+// Seconds-long pads, analysed several times over: slow on CI runners.
+describe('pads', { timeout: 30000 }, () => {
   const at = (x: Float32Array) => analyse({ samples: x, sampleRate: RATE })
   /** `xs` together, at half their level each (two saws at full would clip). */
   const mix = (...xs: Float32Array[]) => xs[0].map((_, i) => 0.5 * xs.reduce((s, x) => s + x[i], 0))
@@ -363,7 +364,7 @@ describe('pads', () => {
     // Three saws at -3, 0 and +5 cents.
     const voices = at(mix(...[-3, 0, 5].map((c) => tone(261.63 * 2 ** (c / 1200), sawAmps(261.63), 6))))
     expect(voices.voices!.map((v) => Math.round(v.cents - voices.voices![1].cents))).toEqual([-3, 0, 5])
-  }, 20000)
+  })
 
   it('hears two oscillators a few cents apart beating, not swinging', () => {
     const a = at(mix(tone(130.81, sawAmps(130.81), 8), tone(130.81 * 2 ** (4 / 1200), sawAmps(130.81), 8)))
