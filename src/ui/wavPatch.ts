@@ -26,7 +26,8 @@
 //   Macros     1 Bright (Filt 1 Cutoff), 2 Timbre (FM Depth, WaveScan, or Resonance on one wave),
 //              3 Attack and 4 Release (ENV 2), Movement (how far ENV 1 or 3 moves things) and Dirt
 //              (Filter 1 Drive after the filter, a quarter up: some grit a clean fit lacks), each
-//              knob in its middle (or at an end) where the patch is as generated: a starting point
+//              knob in its middle (or at an end) where the patch is as generated: a starting point;
+//              Unison (OSC 2 and 3 copies 10 cents either side, from none) where those are free
 //   Playing    velocity scales the Amp envelope and opens the filter (ENV 1's amount, or route 3
 //              to Filt 1 Cutoff); aftertouch, channel or poly (routes 4 and 5), opens it further
 // A recording with no note in it (little in harmonics, no clear repeat: a hi-hat, a crash, a clap)
@@ -459,6 +460,9 @@ function envelopeOfTrack(times: number[], raw: number[], startS: number, least: 
   const decayS = fall > 0 && half > 0 ? 2 * (times[half] - times[held]) : 0
   return { track, base, span, attackS: times[top] - startS, holdS: times[held] - times[top], decayS, sustain: (end - base) / span }
 }
+
+/** The Unison macro's copies (OSC 2 and 3): cents either side of the note (Unison mode's Detune 20 was too fat). */
+const UNISON = { cents: 10 }
 
 /** Filter 1 Drive (Post) a generated patch starts with: a quarter of the Dirt knob. */
 const DRIVE = 256
@@ -982,7 +986,19 @@ export function buildWavPatch(
   const scanByEnvelope = waves.length > 1 && !swingTimbre
   const timbre: Timbre = fm || pulse ? ['mutant1depth', 'Timbre', 384, 'middle'] : scanByEnvelope ? ['osc1wavscan', 'Timbre', 512, 'bottom'] : RESONANCE
   const moving = lfo4 !== null ? 'lfo4level' : filterEnvelope ? 'filter1env1amount' : fm?.envelope || scanByEnvelope ? 'modmatrix1depth' : null
-  const macros = finish(p, filterEnvelope, timbre, moving, !!added.noise)
+  // Unison, as an option on a macro: OSC 2 and 3 copies of the wave, UNISON.cents either side,
+  // faded in by the knob from none (the patch as generated). Only where both are free and OSC 1
+  // plays one wave as it is (no WaveScan, FM or pulse width the copies wouldn't follow).
+  const unison = !second && !sub && !added.detune && !voices && !fm && !pulse && waves.length === 1
+  if (unison) {
+    for (const [n, cents] of [[2, UNISON.cents], [3, -UNISON.cents]]) {
+      p.set(`osc${n}type`, waves[0])
+      p.set(`osc${n}semi`, 0) // Init has OSC 3 an octave down
+      p.set(`osc${n}cent`, cents)
+      p.set(`mixerosc${n}vol`, 0)
+    }
+  }
+  const macros = finish(p, filterEnvelope, timbre, moving, !!added.noise, unison)
 
   return {
     patch: p,
@@ -1015,7 +1031,7 @@ const RESONANCE: Timbre = ['filter1resonance', 'Resonance', 640, 'bottom']
  * and the macros (`moving`: what Movement scales, if anything moves; `noise`: a Noise macro for the
  * noise the recording had). Returns the macros' names.
  */
-function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: string | null, noise = false): string[] {
+function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: string | null, noise = false, unison = false): string[] {
   // Playing: velocity on the Amp envelope and the filter, aftertouch on the filter.
   p.set('ampvelenv', 512 + PLAYING.ampVelocity * 8)
   if (filterEnvelope) p.set('filter1velenv', 512 + PLAYING.filterVelocity * 8)
@@ -1049,6 +1065,13 @@ function finish(p: Patch, filterEnvelope: boolean, timbre: Timbre, moving: strin
   if (noise) {
     const v = p.get('mixernoisevol')
     knob('mixernoisevol', 'Noise', v <= 512 ? 2 * v : v)
+  }
+  // Unison: OSC 2 and 3 (set up as copies) from silent at the bottom to as loud as OSC 1 at the top.
+  if (unison) {
+    knob('mixerosc2vol', 'Unison', p.get('mixerosc1vol'), 'bottom')
+    const n = macros.length
+    p.set(`macro${n}target2`, destinationOf('mixerosc3vol')!)
+    p.set(`macro${n}depth2`, p.get(`macro${n}depth1`))
   }
   return macros
 }

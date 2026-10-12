@@ -165,7 +165,15 @@ describe('buildWavPatch', () => {
 
   it('puts what to shape next on macros, each knob where the patch is', () => {
     const w = buildWavPatch(saw, { levels })
-    expect(w.macros).toEqual(['Bright', 'Resonance', 'Attack', 'Release', 'Dirt'])
+    expect(w.macros).toEqual(['Bright', 'Resonance', 'Attack', 'Release', 'Dirt', 'Unison'])
+    // Unison: OSC 2 and 3 copies of the wave either side of the note, faded in from none.
+    expect(show(w.patch, 'macro6target1')).toBe('Osc 2 Vol')
+    expect(show(w.patch, 'macro6target2')).toBe('Osc 3 Vol')
+    expect(w.patch.get('macro6panelvalue')).toBe(0)
+    expect(w.patch.get('macro6depth1')).toBe(w.patch.get('macro6depth2'))
+    expect([w.patch.get('mixerosc2vol'), w.patch.get('mixerosc3vol')]).toEqual([0, 0])
+    expect([w.patch.get('osc2type'), w.patch.get('osc3type')]).toEqual([w.patch.get('osc1type'), w.patch.get('osc1type')])
+    expect([w.patch.get('osc2cent'), w.patch.get('osc3cent'), w.patch.get('osc3semi')]).toEqual([10, -10, 0])
     expect(show(w.patch, 'macro5target1')).toBe('Filt 1 Drive')
     // Some Post drive to start with, a quarter up the knob: from none to four times as much.
     expect(w.patch.get('macro5panelvalue')).toBe(256)
