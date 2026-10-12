@@ -57,6 +57,11 @@ function condition(key: string): Condition | undefined {
   return undefined
 }
 
+// Captions Edisyn shortens where the editor shows the knob without its context.
+const LABEL_OVERRIDES: Record<string, string[]> = {
+  mixerfilterrouting: ['Filter Routing'],
+}
+
 // The synth sends these but ignores them on receive (Edisyn's notes): whole-patch send only.
 const RECEIVE_IGNORED = new Set(['arptempo', 'filter1vowelorder'])
 // Bytes outside the param layout that a field's high byte must not overwrite: the patch name
@@ -153,7 +158,7 @@ for (const m of meta.values()) {
   if (!m.kind || !['dial', 'choice', 'check'].includes(m.kind)) throw new Error(`${m.key}: widget ${m.kind}`)
   const def: ParamDef = {
     key: m.key,
-    labels: (m.labels ?? []).map(cleanLabel).filter(Boolean),
+    labels: LABEL_OVERRIDES[m.key] ?? (m.labels ?? []).map(cleanLabel).filter(Boolean),
     min: m.min,
     max: m.max,
     widget: m.kind as ParamDef['widget'],

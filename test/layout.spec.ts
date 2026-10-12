@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { PARAMS } from '../src/params/generated'
 import { FX_PRESET_PARAMS } from '../src/params/fxPresets'
 import { param } from '../src/params/patch'
-import { MODULES, moduleOf, slotKeys } from '../src/ui/layout'
+import { MIRRORS, MODULES, moduleOf, slotKeys } from '../src/ui/layout'
 
-const placed = MODULES.flatMap((m) => m.pages.flatMap((p) => p.slots.flatMap(slotKeys)))
+const keysOf = (m: (typeof MODULES)[number]) => m.pages.flatMap((p) => p.slots.flatMap(slotKeys))
+// Each key's home placement; mirrored copies elsewhere are checked on their own below.
+const placed = MODULES.flatMap((m) => keysOf(m).filter((k) => (MIRRORS.get(k) ?? m.id) === m.id))
 
 describe('module layout', () => {
   it('places every param exactly once', () => {
@@ -15,6 +17,14 @@ describe('module layout', () => {
     expect(dupes).toEqual([])
     expect(placed.filter((k) => !known.has(k))).toEqual([])
     expect(all.map((p) => p.key).filter((k) => !seen.has(k))).toEqual([])
+  })
+
+  it('mirrors only keys placed in their home module', () => {
+    for (const [key, home] of MIRRORS) {
+      expect(keysOf(MODULES.find((m) => m.id === home)!), key).toContain(key)
+      expect(MODULES.filter((m) => keysOf(m).includes(key)).length, key).toBeGreaterThan(1)
+    }
+    expect(moduleOf('mixerosc1vol')?.id).toBe('mixer')
   })
 
   it('fits every page on the eight Control knobs', () => {

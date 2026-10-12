@@ -774,7 +774,7 @@ export const PARAMS: ParamDef[] = [
   {"key":"macro8target6","labels":["Destination 6"],"min":0,"max":329,"widget":"choice","field":{"offset":1344,"size":2,"signed":false},"choices":14,"nrpn":{"param":8045,"table":0}},
   {"key":"macro8target7","labels":["Destination 7"],"min":0,"max":329,"widget":"choice","field":{"offset":1346,"size":2,"signed":false},"choices":14,"nrpn":{"param":8046,"table":0}},
   {"key":"macro8target8","labels":["Destination 8"],"min":0,"max":329,"widget":"choice","field":{"offset":1348,"size":2,"signed":false},"choices":14,"nrpn":{"param":8047,"table":0}},
-  {"key":"mixerfilterrouting","labels":["Routing"],"min":0,"max":1,"widget":"choice","field":{"offset":302,"size":1,"signed":false},"choices":15,"nrpn":{"param":8108,"base":0,"mul":1,"negAdd":0}},
+  {"key":"mixerfilterrouting","labels":["Filter Routing"],"min":0,"max":1,"widget":"choice","field":{"offset":302,"size":1,"signed":false},"choices":15,"nrpn":{"param":8108,"base":0,"mul":1,"negAdd":0}},
   {"key":"mixernoisefilterratio","labels":["Noise","Filter Ratio"],"min":0,"max":1024,"widget":"dial","field":{"offset":306,"size":2,"signed":false},"display":21,"nrpn":{"param":8244,"base":0,"mul":8,"negAdd":0}},
   {"key":"mixernoisepan","labels":["Noise","Pan"],"min":0,"max":1024,"widget":"dial","field":{"offset":300,"size":2,"signed":false},"display":22,"nrpn":{"param":8206,"base":0,"mul":8,"negAdd":0}},
   {"key":"mixernoisevol","labels":["Noise","Volume"],"min":0,"max":1024,"widget":"dial","field":{"offset":282,"size":2,"signed":false},"display":0,"nrpn":{"param":8205,"base":0,"mul":8,"negAdd":0}},

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { param, type Patch } from '../params/patch'
-import { MODULES, type ModuleLayout, type Page, type Slot } from '../ui/layout'
+import { MIRRORS, MODULES, type ModuleLayout, type Page, type Slot } from '../ui/layout'
 import { destinationOf } from '../ui/modDestinations'
 import { isShown } from '../ui/visibility'
 import { ParamControl } from './controls/ParamControl'
@@ -50,7 +50,13 @@ function visibleKey(slot: Slot, patch: Patch): string | null {
   return key !== null && isShown(key, patch) ? key : null
 }
 
-function PageView({ title, slots, note }: { title: string; slots: Slot[]; note?: string }) {
+/** A mirrored knob's caption away from home: "Volume" on OSC 1, not the Mixer's "Osc 1". */
+function mirrorCaption(key: string, module: string): string | undefined {
+  const home = MIRRORS.get(key)
+  return home !== undefined && home !== module ? param(key).labels.at(-1) : undefined
+}
+
+function PageView({ module, title, slots, note }: { module: string; title: string; slots: Slot[]; note?: string }) {
   const patch = useEditor((s) => s.sync?.patch)
   useEditor((s) => s.sync?.revision)
   if (!patch) return null
@@ -67,7 +73,7 @@ function PageView({ title, slots, note }: { title: string; slots: Slot[]; note?:
           key === null ? (
             <div key={i} className="control control--empty" aria-hidden="true" />
           ) : (
-            <ParamControl key={i} paramKey={key} label={captionFor(key, patch)} />
+            <ParamControl key={i} paramKey={key} label={captionFor(key, patch) ?? mirrorCaption(key, module)} />
           ),
         )}
       </div>
@@ -259,7 +265,7 @@ export function ModuleEditor() {
         <ModuleDisplay module={module.id} />
         {blocks(module.pages).map((b, i) =>
           b.kind === 'page' ? (
-            <PageView key={`${id}-${i}`} title={b.page.title} slots={b.page.slots} note={b.page.note} />
+            <PageView key={`${id}-${i}`} module={module.id} title={b.page.title} slots={b.page.slots} note={b.page.note} />
           ) : (
             <TableView key={`${id}-${i}`} title={b.title} rows={b.rows} />
           ),

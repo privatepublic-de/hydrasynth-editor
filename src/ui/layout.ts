@@ -30,6 +30,12 @@ export interface ModuleLayout {
   keyboardOnly?: true
 }
 
+/**
+ * Keys a page shows again outside their home module, for convenience: key -> the home module's id.
+ * The copy is the same param (same value, same modulation badges); its label still names the home.
+ */
+export const MIRRORS: ReadonlyMap<string, string> = new Map([1, 2, 3].map((n) => [`mixerosc${n}vol`, 'mixer']))
+
 const range = (n: number, from = 1) => Array.from({ length: n }, (_, i) => i + from)
 
 /** Envelope and LFO times have one key per BPM Sync state. */
@@ -50,7 +56,8 @@ function osc(n: number): ModuleLayout {
         `${p}semi`,
         `${p}cent`,
         scanning ? `${p}wavscan` : null,
-        null,
+        // The Mixer's volume for this oscillator, shown here too (see MIRRORS).
+        `mixer${p}vol`,
         `${p}bitreduction`,
         `${p}keytrack`,
       ],
@@ -371,7 +378,12 @@ export function slotKeys(slot: Slot): string[] {
 }
 
 const MODULE_BY_KEY: ReadonlyMap<string, ModuleLayout> = new Map(
-  MODULES.flatMap((m) => m.pages.flatMap((p) => p.slots.flatMap(slotKeys)).map((k) => [k, m] as const)),
+  MODULES.flatMap((m) =>
+    m.pages
+      .flatMap((p) => p.slots.flatMap(slotKeys))
+      .filter((k) => (MIRRORS.get(k) ?? m.id) === m.id)
+      .map((k) => [k, m] as const),
+  ),
 )
 
 export function moduleOf(key: string): ModuleLayout | undefined {
