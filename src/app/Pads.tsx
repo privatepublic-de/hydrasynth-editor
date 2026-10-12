@@ -1,6 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NOTE_NAMES, noteName } from '../audio/pitch'
 import { useEditor } from './store'
+
+/**
+ * The computer keyboard plays the pads by key position, not by letter, so any layout works: on an
+ * English one Z…, (comma) is the bottom pad row, A…K the middle and Q…I the top.
+ */
+const KEY_ROWS = [
+  ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM', 'Comma'],
+  ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK'],
+  ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI'],
+]
+const KEY_PADS = new Map(KEY_ROWS.flatMap((row, r) => row.map((code, i) => [code, r * 8 + i] as const)))
+
+/** Whether a key typed at this element is text for it: in a text field, a select or the patch picker's search, the letters are not notes. */
+function typing(t: EventTarget | null) {
+  if (!(t instanceof HTMLElement)) return false
+  if (t.closest('[role="dialog"]') || t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return true
+  return t.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button'].includes((t as HTMLInputElement).type)
+}
 
 /** 24 pads like the Desktop's, chromatic from the bottom left; play notes to audition the patch. */
 export function Pads() {
@@ -12,29 +30,69 @@ export function Pads() {
   const [latch, setLatch] = useState(false)
   const rows = [2, 1, 0].map((r) => Array.from({ length: 8 }, (_, i) => base + r * 8 + i))
 
+  // The held notes as of now, for key events that come quicker than renders.
+  const heldNow = useRef(held)
+
   const press = (n: number, on: boolean) => {
-    if (on === held.has(n)) return
+    if (on === heldNow.current.has(n)) return
     note(n, on)
-    setHeld((h) => {
-      const next = new Set(h)
-      if (on) next.add(n)
-      else next.delete(n)
-      return next
-    })
+    const next = new Set(heldNow.current)
+    if (on) next.add(n)
+    else next.delete(n)
+    heldNow.current = next
+    setHeld(next)
   }
 
   // In latch mode a press toggles the note, and a release does nothing.
-  const down = (n: number) => press(n, latch ? !held.has(n) : true)
+  const down = (n: number) => press(n, latch ? !heldNow.current.has(n) : true)
   const up = (n: number) => {
     if (!latch) press(n, false)
   }
   const toggleLatch = () => {
     if (latch) {
-      for (const n of held) note(n, false)
-      setHeld(new Set())
+      for (const n of heldNow.current) note(n, false)
+      heldNow.current = new Set()
+      setHeld(heldNow.current)
     }
     setLatch(!latch)
   }
+
+  // The keys' handlers see this render's base, latch and connection.
+  const keys = useRef({ down, up, base, connected })
+  keys.current = { down, up, base, connected }
+  useEffect(() => {
+    // The note each key started, so its release ends that note even after an octave change.
+    const playing = new Map<string, number>()
+    const onDown = (e: KeyboardEvent) => {
+      const pad = KEY_PADS.get(e.code)
+      if (pad === undefined || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return
+      if (!keys.current.connected || document.querySelector('dialog[open]')) return
+      e.preventDefault()
+      if (e.repeat || playing.has(e.code)) return
+      const n = keys.current.base + pad
+      playing.set(e.code, n)
+      keys.current.down(n)
+    }
+    const onUp = (e: KeyboardEvent) => {
+      const n = playing.get(e.code)
+      if (n === undefined) return
+      playing.delete(e.code)
+      keys.current.up(n)
+    }
+    // A key let go in another window sends no keyup here: end its note on leaving.
+    const onBlur = () => {
+      for (const n of playing.values()) keys.current.up(n)
+      playing.clear()
+    }
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
 
   return (
     <section className="pads" aria-label="Pads">
