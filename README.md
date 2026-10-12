@@ -24,6 +24,11 @@ Use Chrome, Edge or Firefox (Safari has no Web MIDI), allow MIDI access, click C
 Nothing to install; everything runs in the browser, see the
 [privacy statement](https://privatepublic-de.github.io/hydrasynth-editor/privacy.html).
 
+The pads under the editor play notes on the synth to audition the patch, with the mouse or the
+computer keyboard: three rows of letters play the three pad rows (on an English layout Z to
+comma the bottom one, A to K the middle, Q to I the top). Keys go by position, so any layout
+works, and they are left alone while typing in a text field or a dialog.
+
 ### Offline, from your own computer
 
 Web MIDI only works on a served page, not on a file opened from disk, so offline the editor
